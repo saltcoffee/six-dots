@@ -78,20 +78,12 @@ export class Controller {
   refresh(): void {
     if (this.disposed || this.drag || this.menu) return;
     if (!editable(this.view)) { this.block = null; this.button.hidden = true; return; }
-    if (this.actions.settings().handle === 'cursor') this.block = this.cache.snapshot ? atPosition(this.cache.snapshot, this.view.state.selection.main.head) : null;
-    else if (this.point) this.pick(this.point.x, this.point.y);
-    else this.block = null;
     this.measure();
-  }
-  private pick(x: number, y: number): void {
-    const pos = this.view.posAtCoords({ x, y });
-    this.block = pos === null || !this.cache.snapshot ? null : atPosition(this.cache.snapshot, pos);
   }
   private hover(event: PointerEvent): void {
     if (this.drag || this.menu || this.actions.settings().handle !== 'hover') return;
     this.clearHide(); this.point = { x: event.clientX, y: event.clientY };
-    if (!editable(this.view)) { this.button.hidden = true; return; }
-    this.pick(event.clientX, event.clientY); this.measure();
+    this.refresh();
   }
   private clearHide(): void { if (this.hideTimer !== null) clearTimeout(this.hideTimer); this.hideTimer = null; }
   private hideLater(): void {
@@ -104,10 +96,20 @@ export class Controller {
     this.view.requestMeasure({
       key: this,
       read: view => {
-        if (!this.block || !editable(view)) return null;
-        const visible = view.visibleRanges.find(range => range.to >= this.block!.from && range.from <= this.block!.contentTo);
+        if (this.disposed) return null;
+        if (!editable(view)) { this.block = null; return null; }
+        // Selection updates run before DOM writes finish; resolve hover coordinates in the read phase.
+        if (!this.drag && !this.menu) {
+          const snapshot = this.cache.snapshot;
+          const pos = this.actions.settings().handle === 'cursor' ? view.state.selection.main.head
+            : this.point && snapshot ? view.posAtCoords(this.point) : null;
+          this.block = pos === null || !snapshot ? null : atPosition(snapshot, pos);
+        }
+        const block = this.block;
+        if (!block) return null;
+        const visible = view.visibleRanges.find(range => range.to >= block.from && range.from <= block.contentTo);
         if (!visible) return null;
-        const coords = view.coordsAtPos(Math.max(this.block.from, visible.from));
+        const coords = view.coordsAtPos(Math.max(block.from, visible.from));
         const bounds = view.scrollDOM.getBoundingClientRect();
         return coords && coords.bottom > bounds.top && coords.top < bounds.bottom ? { x: bounds.left + 2, y: Math.max(bounds.top, coords.top) - 2 } : null;
       },
