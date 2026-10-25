@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 - 2026-10-25
+
+- Normalize iOS visual-viewport coordinates for handles, drop indicators, and drag previews when the keyboard shifts the viewport.
+- Refresh handle visibility after closing block actions so unfocused mobile editors do not keep a stale handle.
+
 ## 0.1.2 - 2026-10-25
 
 - Enable SixDots on phones and tablets with a cursor-following handle and a larger touch target.

@@ -9,7 +9,8 @@ import { Actions } from '../obsidian/actions';
 import { editable, targetFor, fileFor } from './context';
 import type { Target } from './context';
 import { SnapshotCache } from './snapshot-cache';
-import { fitPoint, intersect, viewportBounds } from './viewport';
+import { fitPoint, intersect, toFixedPoint, viewportBounds } from './viewport';
+import type { Point } from './viewport';
 
 interface Drag {
   target: Target; pointer: number; x: number; y: number; currentX: number; currentY: number;
@@ -135,7 +136,7 @@ export class Controller {
         const bounds = this.visibleBounds(), x = view.scrollDOM.getBoundingClientRect().left + 2;
         const width = this.touchUI ? 44 : 24;
         return bounds && coords && x >= bounds.left && x + width <= bounds.right && coords.bottom > bounds.top && coords.top < bounds.bottom
-          ? fitPoint(bounds, x, coords.top - (this.touchUI ? 10 : 2), width, this.touchUI ? 44 : 26) : null;
+          ? this.fixedPosition(fitPoint(bounds, x, coords.top - (this.touchUI ? 10 : 2), width, this.touchUI ? 44 : 26)) : null;
       },
       write: position => {
         if (this.disposed) return;
@@ -149,7 +150,11 @@ export class Controller {
   }
   private visibleBounds() {
     const bounds = this.view.scrollDOM.getBoundingClientRect(), win = this.view.dom.ownerDocument.defaultView;
-    return win ? intersect(bounds, viewportBounds(win)) : bounds;
+    return win ? intersect(bounds, viewportBounds(win, Platform.isIosApp)) : bounds;
+  }
+  private fixedPosition(point: Point): Point {
+    const win = this.view.dom.ownerDocument.defaultView;
+    return win ? toFixedPoint(win, point, Platform.isIosApp) : point;
   }
   current(): Target | null {
     if (!editable(this.view)) { this.actions.notify(this.actions.t('selectOne')); return null; }
@@ -174,7 +179,7 @@ export class Controller {
     this.button.setAttribute('aria-expanded', 'true');
     if (Platform.isMobile) this.view.contentDOM.blur();
     this.menu = this.actions.showMenu(this.view, target, { x: rect.left, y: rect.bottom }, () => {
-      this.menu = null; this.button.setAttribute('aria-expanded', 'false'); this.hideLater();
+      this.menu = null; this.button.setAttribute('aria-expanded', 'false'); this.measure(); this.hideLater();
     });
   }
   private down(event: PointerEvent): void {
@@ -221,7 +226,7 @@ export class Controller {
       const edge = 40, y = drag.currentY;
       const delta = y < bounds.top + edge ? -Math.min(18, (bounds.top + edge - y) / 2) : y > bounds.bottom - edge ? Math.min(18, (y - bounds.bottom + edge) / 2) : 0;
       if (drag.currentX >= bounds.left && drag.currentX <= bounds.right) this.view.scrollDOM.scrollTop += delta;
-      const point = fitPoint(viewportBounds(win), drag.currentX + 16, drag.currentY + 12, 280, 60);
+      const point = this.fixedPosition(fitPoint(viewportBounds(win, Platform.isIosApp), drag.currentX + 16, drag.currentY + 12, 280, 60));
       this.preview.style.left = `${point.x}px`; this.preview.style.top = `${point.y}px`;
       this.findDrop();
       if (delta !== 0) this.animate();
@@ -245,8 +250,9 @@ export class Controller {
     const coords = after ? end : start;
     try { drag.plan = move(drag.target.snapshot, drag.target.block, candidate, after); } catch { return; }
     if (!drag.plan || !coords) return;
-    this.indicator.hidden = false; this.indicator.style.left = `${bounds.left + track}px`;
-    this.indicator.style.top = `${after ? coords.bottom : coords.top}px`;
+    const point = this.fixedPosition({ x: bounds.left + track, y: after ? coords.bottom : coords.top });
+    this.indicator.hidden = false; this.indicator.style.left = `${point.x}px`;
+    this.indicator.style.top = `${point.y}px`;
     this.indicator.style.width = `${Math.max(0, bounds.right - bounds.left - track - 8)}px`;
     this.status.textContent = this.actions.t('drop');
   }
