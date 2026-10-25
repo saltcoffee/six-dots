@@ -1,0 +1,44 @@
+.six-dots-editor .cm-scroller { padding-inline-start: 28px; }
+.six-dots-handle {
+  position: fixed;
+  z-index: 50;
+  width: 24px;
+  height: 26px;
+  padding: 3px;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: grab;
+  touch-action: none;
+}
+.six-dots-handle:hover, .six-dots-handle:focus-visible {
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+}
+.six-dots-handle:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
+.six-dots-handle.is-dragging { cursor: grabbing; }
+.six-dots-handle svg { width: 16px; height: 16px; }
+.six-dots-drop { position: fixed; z-index: 49; height: 2px; background: var(--interactive-accent); pointer-events: none; }
+.six-dots-preview {
+  position: fixed;
+  z-index: 100;
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  font-size: var(--font-ui-small);
+}
+.six-dots-handle[hidden], .six-dots-drop[hidden], .six-dots-preview[hidden] { display: none !important; }
+.six-dots-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.six-dots-link { width: 100%; min-height: 90px; resize: vertical; }
+.six-dots-summary { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
+.six-dots-path { overflow-wrap: anywhere; color: var(--text-muted); }
+@media (prefers-reduced-motion: reduce) { .six-dots-handle { transition: none; } }

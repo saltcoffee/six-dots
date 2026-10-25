@@ -1,0 +1,13 @@
+node_modules/
+/docs/
+/dist/
+/main.js
+/main.js.map
+/coverage/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+.obsidian/
+.idea/
+.vscode/

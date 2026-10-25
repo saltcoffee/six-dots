@@ -1,0 +1,41 @@
+{
+  "name": "six-dots",
+  "version": "0.1.0",
+  "description": "Drag handles and quick block actions for Obsidian.",
+  "private": true,
+  "license": "MIT",
+  "author": "gua",
+  "repository": "https://github.com/saltcoffee/six-dots",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node esbuild.config.mjs --watch",
+    "build": "npm run typecheck && node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests scripts",
+    "test": "vitest run",
+    "check-release": "node scripts/check-release.mjs",
+    "package": "node scripts/package.mjs",
+    "release-notes": "node scripts/release-notes.mjs",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build && npm run check-release"
+  },
+  "dependencies": {
+    "@lezer/markdown": "^1.6.3"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.10.1",
+    "@codemirror/language": "^6.11.3",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.6",
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "eslint": "10.13.0",
+    "obsidian": "1.14.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "8.72.0",
+    "vitest": "5.0.5"
+  },
+  "type": "module"
+}
