@@ -1,7 +1,7 @@
 {
   "id": "six-dots",
   "name": "SixDots",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.14.5",
   "description": "Reorder Markdown blocks with drag handles and apply quick block actions.",
   "author": "gua",

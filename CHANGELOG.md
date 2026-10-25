@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 - 2026-10-25
+
+- Fix six-dot handles disappearing when clicking in a note to enter editing.
+- Refresh the hovered block after scrolling so the handle and its actions stay aligned with the visible content.
+
 ## 0.1.0 - 2026-10-25
 
 - Add six-dot handles for moving paragraphs, headings, list-item subtrees, quotes, callouts, and fenced code blocks.
