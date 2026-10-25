@@ -122,7 +122,7 @@ export class Actions {
   }
   private generateId(snapshot: Snapshot): string {
     let id: string;
-    do { id = crypto.randomUUID().replaceAll('-', '').slice(0, 10); }
+    do { id = Array.from(crypto.getRandomValues(new Uint8Array(5)), byte => byte.toString(16).padStart(2, '0')).join(''); }
     while (snapshot.text.includes(`^${id}`));
     return id;
   }
@@ -170,15 +170,15 @@ export class Actions {
             return this.commit(view, target, extractionPlan(target.block, link));
           },
         });
-        if (this.alive && created) this.extractionNotice(path, result === 'success' ? 'extracted' : result === 'diverged' ? 'diverged' : result === 'target-changed' ? 'targetChanged' : 'partial');
+        if (this.alive && created) this.extractionNotice(view.dom.ownerDocument, path, result === 'success' ? 'extracted' : result === 'diverged' ? 'diverged' : result === 'target-changed' ? 'targetChanged' : 'partial');
         if (result === 'success') return null;
         return reject(result === 'creation-unknown' ? 'unknownCreate' : result === 'create-failed' ? 'failed' : result === 'diverged' ? 'diverged' : result === 'target-changed' ? 'targetChanged' : 'partial', result === 'create-failed');
       } finally { this.extracting.delete(target.file); }
     });
     this.open(modal);
   }
-  private extractionNotice(path: string, key: 'extracted' | 'partial' | 'targetChanged' | 'diverged'): void {
-    const fragment = document.createDocumentFragment();
+  private extractionNotice(doc: Document, path: string, key: 'extracted' | 'partial' | 'targetChanged' | 'diverged'): void {
+    const fragment = doc.createDocumentFragment();
     fragment.createEl('span', { text: `${this.t(key)} ${path} ` });
     fragment.createEl('a', { text: this.t('openNote'), href: '#' }).addEventListener('click', event => {
       event.preventDefault(); const file = this.app.vault.getAbstractFileByPath(path);

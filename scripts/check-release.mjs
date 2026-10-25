@@ -9,10 +9,12 @@ const assert = (condition, message) => { if (!condition) throw new Error(message
 assert(/^\d+\.\d+\.\d+$/.test(manifest.version), 'Version must be x.y.z');
 assert(!tag || tag === manifest.version, 'The tag must match manifest.version exactly, without v');
 assert(pkg.version === manifest.version, 'package.json and manifest versions differ');
+assert(pkg.devDependencies.obsidian === manifest.minAppVersion, 'Compile against the minimum supported Obsidian SDK');
 assert(manifest.name === 'SixDots' && manifest.id === 'six-dots', 'Unexpected plugin identity');
 assert(versions[manifest.version] === manifest.minAppVersion, 'Missing minimum app mapping');
 assert(manifest.description.length <= 250 && manifest.description.endsWith('.'), 'Invalid marketplace description');
 for (const file of ['main.js', 'styles.css', 'LICENSE', 'README.md', 'README.zh-CN.md', 'THIRD_PARTY_NOTICES.md']) assert(existsSync(file) && readFileSync(file).length > 0, `Missing ${file}`);
+assert(!/require\(["']@lezer\//.test(readFileSync('main.js', 'utf8')), 'Private parser must not depend on host Lezer versions');
 const notes = releaseNotes(readFileSync('CHANGELOG.md', 'utf8'), manifest.version);
 assert(!/TODO|TBD|placeholder/i.test(notes), 'Release notes contain unfinished text');
 for (const file of ['README.md', 'README.zh-CN.md']) {

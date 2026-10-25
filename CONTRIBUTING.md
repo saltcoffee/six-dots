@@ -2,7 +2,11 @@
 
 Use Node.js 24 and npm. Install with `npm ci`, then run `npm run dev` while developing. `npm run check` runs type checking, lint, tests, production build, and release validation.
 
+The Obsidian SDK is pinned to the minimum supported app version, 1.8.7, so type checking catches accidental use of newer APIs. Keep CodeMirror external to share the host's runtime; bundle the independent Markdown parser and its Lezer dependencies. A newer development tool does not by itself require raising `minAppVersion`.
+
 Test in a separate vault by copying `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/six-dots/`. Verify undo, cancellation, nested lists, and both editing modes. Never use private notes as test fixtures.
+
+For mobile changes, verify tap actions, hold-then-drag, early movement, multiple touches, keyboard resizing, and narrow dialogs. Record whether testing used mobile emulation or a physical iOS/Android device.
 
 Keep source files under 600 lines. Put text transformations in `src/domain`, editor state and geometry in `src/editor`, and host operations in `src/obsidian`. Keep user text in both translation dictionaries: Chinese locales use Chinese; all others use English.
 

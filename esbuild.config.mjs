@@ -10,8 +10,11 @@ const build = await context({
   outfile: 'main.js',
   sourcemap: process.argv.includes('--watch') ? 'inline' : false,
   minify: false,
-  external: ['obsidian', 'electron', '@codemirror/*', '@lezer/common', '@lezer/lr', '@lezer/highlight', ...builtinModules],
-  banner: { js: '/* SixDots — MIT. Source: https://github.com/saltcoffee/six-dots\n' + readFileSync('LICENSE', 'utf8') + '\nBundled @lezer/markdown:\n' + readFileSync('node_modules/@lezer/markdown/LICENSE', 'utf8') + '\n*/' },
+  // CodeMirror must share Obsidian's runtime. Our parser's trees stay private,
+  // so bundle its Lezer runtime instead of requiring a recent host version.
+  external: ['obsidian', 'electron', '@codemirror/*', ...builtinModules],
+  banner: { js: '/* SixDots — MIT. Source: https://github.com/saltcoffee/six-dots\n' + readFileSync('LICENSE', 'utf8')
+    + ['markdown', 'common', 'highlight'].map(name => `\nBundled @lezer/${name}:\n${readFileSync(`node_modules/@lezer/${name}/LICENSE`, 'utf8')}`).join('') + '\n*/' },
 });
 if (process.argv.includes('--watch')) await build.watch();
 else { await build.rebuild(); await build.dispose(); }

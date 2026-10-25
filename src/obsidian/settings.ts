@@ -1,4 +1,4 @@
-import { PluginSettingTab, Setting, Notice } from 'obsidian';
+import { PluginSettingTab, Setting, Notice, Platform } from 'obsidian';
 import type { App } from 'obsidian';
 import type { CalloutType } from '../domain/block';
 import type { Translate } from '../i18n';
@@ -41,7 +41,7 @@ export class SixDotsSettingsTab extends PluginSettingTab {
     containerEl.empty();
     const save = () => { this.owner.refresh(); void this.owner.save().catch(() => new Notice(t('saveFailed'))); };
     new Setting(containerEl).setName(t('enableDrag')).setDesc(t('enableDragHelp')).addToggle(control => control.setValue(settings.drag).onChange(value => { settings.drag = value; save(); }));
-    new Setting(containerEl).setName(t('handleMode')).setDesc(t('handleModeHelp')).addDropdown(control => control.addOptions({ hover: t('hover'), cursor: t('cursor') }).setValue(settings.handle).onChange(value => { settings.handle = value === 'cursor' ? 'cursor' : 'hover'; save(); }));
+    new Setting(containerEl).setName(t('handleMode')).setDesc(t(Platform.isMobile ? 'mobileHandleHelp' : 'handleModeHelp')).addDropdown(control => control.addOptions({ hover: t('hover'), cursor: t('cursor') }).setValue(Platform.isMobile ? 'cursor' : settings.handle).setDisabled(Platform.isMobile).onChange(value => { settings.handle = value === 'cursor' ? 'cursor' : 'hover'; save(); }));
     new Setting(containerEl).setName(t('defaultCallout')).addDropdown(control => control.addOptions({ note: t('note'), info: t('info'), tip: t('tip'), warning: t('warning') }).setValue(settings.callout).onChange(value => { settings.callout = value as CalloutType; save(); }));
     new Setting(containerEl).setName(t('extractFolder')).setDesc(t('extractFolderHelp')).addText(control => control.setValue(settings.folder).onChange(value => { settings.folder = value.trim(); save(); }));
   }

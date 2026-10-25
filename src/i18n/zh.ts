@@ -29,10 +29,12 @@ export const zh: Record<keyof typeof en, string> = {
   enableDrag: '启用拖拽排序', enableDragHelp: '关闭后仍可使用菜单和键盘命令。',
   handleMode: '手柄显示方式', handleModeHelp: '为悬停块或当前光标块显示一个手柄。',
   hover: '悬停时显示', cursor: '跟随光标', defaultCallout: '默认标注类型',
+  mobileHandleHelp: '手机和平板上，手柄跟随光标。轻点打开菜单，长按片刻后可拖动排序。',
+  touchActions: '块操作：轻点打开菜单，长按后拖动。', dragReady: '可以移动了，请拖动手柄。',
   extractFolder: '提取目录', extractFolderHelp: '留空时使用源笔记所在目录，填写 / 使用笔记库根目录。',
   saveFailed: '设置保存失败，请重试。', invalidSettings: '部分设置无效，已恢复为默认值。',
   futureSettings: '设置来自更高版本的 SixDots，当前版本不会覆盖它们。',
   includesChildren: '包含子内容', onlyHeading: '仅移动标题', drop: '移动到此处',
-  foldHeading: '请先展开标题，再进行移动。', unsupportedView: '请在桌面端 Markdown 编辑视图中使用 SixDots。',
+  foldHeading: '请先展开标题，再进行移动。', unsupportedView: '请在 Markdown 编辑视图中使用 SixDots。',
   createdId: '原生块 ID', close: '关闭', sourceKept: '已保留当前源内容和目标文件。',
 };

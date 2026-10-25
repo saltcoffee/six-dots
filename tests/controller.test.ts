@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import type { TransactionSpec } from '@codemirror/state';
-import type { EditorView, ViewUpdate } from '@codemirror/view';
-import { editorInfoField } from 'obsidian';
-import { Controller } from '../src/editor/controller';
+import { EditorView } from '@codemirror/view';
+import type { ViewUpdate } from '@codemirror/view';
+import { editorInfoField, Platform } from 'obsidian';
+import { Controller, editorExtension } from '../src/editor/controller';
 import type { Actions } from '../src/obsidian/actions';
 
 vi.mock('obsidian', async () => {
@@ -13,7 +14,7 @@ vi.mock('obsidian', async () => {
     getMode() { return 'source'; }
   }
   return {
-    MarkdownView, setIcon: vi.fn(),
+    MarkdownView, setIcon: vi.fn(), Platform: { isMobile: false },
     editorInfoField: StateField.define({ create: () => new MarkdownView(), update: value => value }),
   };
 });
@@ -22,18 +23,25 @@ vi.mock('../src/obsidian/actions', () => ({ Actions: vi.fn() }));
 const controllers: Controller[] = [];
 type Measurement = NonNullable<Parameters<EditorView['requestMeasure']>[0]>;
 
-function setup(mode: 'hover' | 'cursor' = 'hover') {
+function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false) {
+  Platform.isMobile = mobile;
   // Keep the host DOM minimal; the layout guard models CodeMirror's update boundary.
   const bounds = { left: 0, top: 0, right: 600, bottom: 400, width: 600, height: 400 };
+  let captured: number | null = null;
   const element = () => Object.assign(new EventTarget(), {
-    hidden: false, className: '', style: { left: '', top: '' },
-    classList: { add: vi.fn(), remove: vi.fn() },
+    hidden: false, className: '', textContent: '', isConnected: true, style: { left: '', top: '' },
+    classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() },
     setAttribute: vi.fn(), remove: vi.fn(), getBoundingClientRect: () => bounds,
+    setPointerCapture: (id: number) => { captured = id; }, hasPointerCapture: (id: number) => captured === id,
+    releasePointerCapture: () => { captured = null; },
   });
+  const viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 600, height: 400 });
+  const win = Object.assign(new EventTarget(), { innerWidth: 600, innerHeight: 400, visualViewport: viewport,
+    requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 16), cancelAnimationFrame: clearTimeout });
   const elements: ReturnType<typeof element>[] = [];
   const doc = Object.assign(new EventTarget(), {
     createElement: () => { const el = element(); elements.push(el); return el; },
-    body: { append: vi.fn() }, defaultView: null,
+    body: { append: vi.fn() }, defaultView: win,
   });
   let phase: 'idle' | 'update' | 'read' | 'write' = 'idle';
   let pending: Measurement | null = null;
@@ -43,7 +51,8 @@ function setup(mode: 'hover' | 'cursor' = 'hover') {
   };
   const host = {
     state: EditorState.create({ doc: 'alpha\n\nbeta', extensions: [editorInfoField] }),
-    dom: Object.assign(element(), { ownerDocument: doc }), scrollDOM: element(), composing: false,
+    dom: Object.assign(element(), { ownerDocument: doc }), scrollDOM: Object.assign(element(), { scrollTop: 0 }), composing: false, hasFocus: true,
+    contentDOM: { blur: vi.fn() },
     get visibleRanges() { return [{ from: 0, to: this.state.doc.length }]; },
     posAtCoords: vi.fn(() => { guard(); return position; }),
     coordsAtPos: vi.fn((pos: number) => { guard(); return { left: 40, right: 40, top: pos < 7 ? 20 : 60, bottom: pos < 7 ? 40 : 80 }; }),
@@ -51,14 +60,20 @@ function setup(mode: 'hover' | 'cursor' = 'hover') {
   };
   const view = host as unknown as EditorView;
   const showMenu = vi.fn<Actions['showMenu']>(() => ({ hide: vi.fn() }) as unknown as ReturnType<Actions['showMenu']>);
+  const apply = vi.fn();
+  const settings = { handle: mode, drag: true };
   const actions = {
-    t: (key: string) => key, settings: () => ({ handle: mode }),
-    committing: new Set(), notify: vi.fn(), showMenu,
+    t: (key: string) => key, settings: () => settings,
+    committing: new Set(), notify: vi.fn(), showMenu, apply, folded: () => false,
   } as unknown as Actions;
   const controller = new Controller(view, actions, vi.fn());
   controllers.push(controller);
   return {
-    controller, host, showMenu, button: elements[0]!,
+    controller, host, showMenu, apply, settings, viewport, win, doc, button: elements[0]!,
+    pointer(type: string, values: Partial<PointerEvent> = {}) {
+      const event = Object.assign(new Event(type, { cancelable: true }), { button: 0, isPrimary: true, pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 30, ...values });
+      (type === 'pointerdown' ? elements[0]! : doc).dispatchEvent(event);
+    },
     hover(pos = 1) {
       position = pos;
       host.dom.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 80, clientY: 30 }));
@@ -89,7 +104,7 @@ function setup(mode: 'hover' | 'cursor' = 'hover') {
   };
 }
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => { Platform.isMobile = false; vi.useFakeTimers(); });
 afterEach(() => { controllers.splice(0).forEach(controller => controller.destroy()); vi.useRealTimers(); });
 
 describe('handle layout lifecycle', () => {
@@ -147,5 +162,106 @@ describe('handle layout lifecycle', () => {
     editor.measure();
     expect(editor.button.hidden).toBe(false);
     expect(editor.button.style.top).toBe(mode === 'cursor' ? '58px' : '18px');
+  });
+});
+
+describe('mobile interaction', () => {
+  it('keeps the track in CodeMirror-managed attributes across focus and selection updates', () => {
+    const editor = setup('hover', true);
+    editor.host.state = EditorState.create({ doc: 'alpha', extensions: [editorInfoField, editorExtension({} as Actions, new Map())] });
+    for (const position of [0, 2]) {
+      editor.host.state = editor.host.state.update({ selection: { anchor: position } }).state;
+      const source = editor.host.state.facet(EditorView.editorAttributes)[0]!;
+      expect(typeof source === 'function' ? source(editor.host as unknown as EditorView) : source)
+        .toEqual({ class: 'six-dots-editor six-dots-touch-editor' });
+    }
+  });
+  it('follows the caret even when a synced desktop setting uses hover', async () => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+    editor.update({ selection: { anchor: 8 } }); editor.measure();
+    editor.controller.openMenu();
+    expect(editor.showMenu.mock.calls[0]?.[1].block.text).toBe('beta');
+    expect(editor.button.classList.toggle).toHaveBeenCalledWith('is-touch', true);
+    expect(editor.host.contentDOM.blur).toHaveBeenCalledOnce();
+    expect(editor.settings.handle).toBe('hover');
+  });
+
+  it('opens the menu on a quick tap without leaving a hold timer behind', async () => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.pointer('pointerdown'); editor.pointer('pointerup');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(editor.showMenu).toHaveBeenCalledOnce();
+    expect(editor.apply).not.toHaveBeenCalled();
+    expect(editor.button.classList.add).not.toHaveBeenCalledWith('is-ready');
+  });
+
+  it('isolates native touches on the handle while leaving document touches alone', () => {
+    const editor = setup('hover', true);
+    const handleTouch = new Event('touchstart', { cancelable: true });
+    const bodyTouch = new Event('touchstart', { cancelable: true });
+    editor.button.dispatchEvent(handleTouch); editor.doc.dispatchEvent(bodyTouch);
+    expect(handleTouch.defaultPrevented).toBe(true); expect(bodyTouch.defaultPrevented).toBe(false);
+  });
+
+  it('cancels movement before a touch hold has armed', async () => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.pointer('pointerdown'); editor.pointer('pointermove', { clientX: 80, clientY: 70 });
+    await vi.advanceTimersByTimeAsync(400); editor.pointer('pointerup', { clientX: 80, clientY: 70 });
+    expect(editor.showMenu).not.toHaveBeenCalled(); expect(editor.apply).not.toHaveBeenCalled();
+    expect(editor.host.state.doc.toString()).toBe('alpha\n\nbeta');
+  });
+
+  it('allows a held touch to move a complete block once', async () => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.pointer('pointerdown'); await vi.advanceTimersByTimeAsync(350);
+    editor.pointAt(10); editor.pointer('pointermove', { clientX: 80, clientY: 90 });
+    await vi.advanceTimersByTimeAsync(16); editor.pointer('pointerup', { clientX: 80, clientY: 90 });
+    expect(editor.apply).toHaveBeenCalledOnce(); expect(editor.showMenu).not.toHaveBeenCalled();
+    expect(editor.apply.mock.calls[0]?.[1].block.text).toBe('alpha');
+    expect(editor.apply.mock.calls[0]?.[2].edits[0].insert).toBe('beta\n\nalpha');
+  });
+
+  it.each(['pointercancel', 'second-pointer', 'keyboard-resize', 'destroy'])('cancels a pending hold on %s', async reason => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure(); editor.pointer('pointerdown');
+    if (reason === 'pointercancel') editor.pointer('pointercancel');
+    if (reason === 'second-pointer') editor.doc.dispatchEvent(Object.assign(new Event('pointerdown'), { pointerId: 2 }));
+    if (reason === 'keyboard-resize') editor.viewport.dispatchEvent(new Event('resize'));
+    if (reason === 'destroy') editor.controller.destroy();
+    await vi.advanceTimersByTimeAsync(400); editor.pointer('pointerup');
+    expect(editor.apply).not.toHaveBeenCalled(); expect(editor.showMenu).not.toHaveBeenCalled();
+    expect(editor.button.classList.add).not.toHaveBeenCalledWith('is-ready');
+  });
+
+  it('keeps tap actions when dragging is disabled', async () => {
+    const editor = setup('hover', true); editor.settings.drag = false;
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.pointer('pointerdown'); await vi.advanceTimersByTimeAsync(400); editor.pointer('pointerup');
+    expect(editor.showMenu).toHaveBeenCalledOnce(); expect(editor.apply).not.toHaveBeenCalled();
+  });
+
+  it('hides handles behind the keyboard and in unfocused mobile editors', async () => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.viewport.height = 15; editor.viewport.dispatchEvent(new Event('resize')); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+    editor.viewport.height = 400; editor.host.hasFocus = false; editor.controller.refresh(); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+    editor.host.hasFocus = true; editor.controller.refresh(); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+  });
+
+  it('preserves the desktop mouse drag without a long press', async () => {
+    const editor = setup();
+    await vi.runAllTimersAsync(); editor.hover(); editor.measure();
+    editor.pointer('pointerdown', { pointerType: 'mouse' }); editor.pointAt(10);
+    editor.pointer('pointermove', { pointerType: 'mouse', clientX: 80, clientY: 90 });
+    editor.pointer('pointerup', { pointerType: 'mouse', clientX: 80, clientY: 90 });
+    expect(editor.apply).toHaveBeenCalledOnce();
   });
 });
