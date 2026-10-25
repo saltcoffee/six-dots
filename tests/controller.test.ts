@@ -14,7 +14,7 @@ vi.mock('obsidian', async () => {
     getMode() { return 'source'; }
   }
   return {
-    MarkdownView, setIcon: vi.fn(), Platform: { isMobile: false },
+    MarkdownView, setIcon: vi.fn(), Platform: { isMobile: false, isIosApp: false },
     editorInfoField: StateField.define({ create: () => new MarkdownView(), update: value => value }),
   };
 });
@@ -23,8 +23,9 @@ vi.mock('../src/obsidian/actions', () => ({ Actions: vi.fn() }));
 const controllers: Controller[] = [];
 type Measurement = NonNullable<Parameters<EditorView['requestMeasure']>[0]>;
 
-function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false) {
+function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false, ios = false) {
   Platform.isMobile = mobile;
+  Platform.isIosApp = ios;
   // Keep the host DOM minimal; the layout guard models CodeMirror's update boundary.
   const bounds = { left: 0, top: 0, right: 600, bottom: 400, width: 600, height: 400 };
   let captured: number | null = null;
@@ -52,14 +53,17 @@ function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false) {
   const host = {
     state: EditorState.create({ doc: 'alpha\n\nbeta', extensions: [editorInfoField] }),
     dom: Object.assign(element(), { ownerDocument: doc }), scrollDOM: Object.assign(element(), { scrollTop: 0 }), composing: false, hasFocus: true,
-    contentDOM: { blur: vi.fn() },
+    contentDOM: { blur: vi.fn(() => { host.hasFocus = false; host.dom.dispatchEvent(new Event('focusout')); }) },
     get visibleRanges() { return [{ from: 0, to: this.state.doc.length }]; },
     posAtCoords: vi.fn(() => { guard(); return position; }),
     coordsAtPos: vi.fn((pos: number) => { guard(); return { left: 40, right: 40, top: pos < 7 ? 20 : 60, bottom: pos < 7 ? 40 : 80 }; }),
     requestMeasure: (request: Measurement) => { pending = request; },
   };
   const view = host as unknown as EditorView;
-  const showMenu = vi.fn<Actions['showMenu']>(() => ({ hide: vi.fn() }) as unknown as ReturnType<Actions['showMenu']>);
+  const showMenu = vi.fn<Actions['showMenu']>((_view, _target, _point, onHide) => {
+    let hidden = false;
+    return { hide: vi.fn(() => { if (!hidden) { hidden = true; onHide(); } }) } as unknown as ReturnType<Actions['showMenu']>;
+  });
   const apply = vi.fn();
   const settings = { handle: mode, drag: true };
   const actions = {
@@ -69,7 +73,7 @@ function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false) {
   const controller = new Controller(view, actions, vi.fn());
   controllers.push(controller);
   return {
-    controller, host, showMenu, apply, settings, viewport, win, doc, button: elements[0]!,
+    controller, host, showMenu, apply, settings, viewport, win, doc, button: elements[0]!, indicator: elements[1]!, preview: elements[2]!,
     pointer(type: string, values: Partial<PointerEvent> = {}) {
       const event = Object.assign(new Event(type, { cancelable: true }), { button: 0, isPrimary: true, pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 30, ...values });
       (type === 'pointerdown' ? elements[0]! : doc).dispatchEvent(event);
@@ -104,7 +108,7 @@ function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false) {
   };
 }
 
-beforeEach(() => { Platform.isMobile = false; vi.useFakeTimers(); });
+beforeEach(() => { Platform.isMobile = false; Platform.isIosApp = false; vi.useFakeTimers(); });
 afterEach(() => { controllers.splice(0).forEach(controller => controller.destroy()); vi.useRealTimers(); });
 
 describe('handle layout lifecycle', () => {
@@ -166,6 +170,46 @@ describe('handle layout lifecycle', () => {
 });
 
 describe('mobile interaction', () => {
+  it('hides the unfocused handle when a mobile menu is dismissed, then restores it on focus', async () => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.controller.openMenu(); editor.measure();
+    expect(editor.host.hasFocus).toBe(false);
+    expect(editor.button.hidden).toBe(false);
+    editor.showMenu.mock.results[0]!.value.hide(); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+    expect(editor.button.setAttribute).toHaveBeenCalledWith('aria-expanded', 'false');
+    editor.host.hasFocus = true; editor.host.dom.dispatchEvent(new Event('focusin')); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+  });
+
+  it('keeps the cursor handle when focus returns as the menu closes', async () => {
+    const editor = setup('cursor', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.controller.openMenu(); editor.measure();
+    editor.showMenu.mock.results[0]!.value.hide();
+    editor.host.hasFocus = true; editor.measure();
+    expect(editor.button.hidden).toBe(false);
+  });
+
+  it('positions the handle and drag overlays on iOS without offsetting raw drop hit tests', async () => {
+    const editor = setup('hover', true, true);
+    Object.assign(editor.viewport, { offsetLeft: 10, offsetTop: 120, width: 380, height: 300 });
+    await vi.runAllTimersAsync(); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+    expect(editor.button.style).toMatchObject({ left: '12px', top: '130px' });
+    editor.pointer('pointerdown'); await vi.advanceTimersByTimeAsync(350);
+    editor.pointAt(10); editor.pointer('pointermove', { clientX: 80, clientY: 90 });
+    await vi.advanceTimersByTimeAsync(16);
+    expect(editor.host.posAtCoords).toHaveBeenLastCalledWith({ x: 80, y: 90 });
+    expect(editor.indicator.hidden).toBe(false);
+    expect(editor.indicator.style).toMatchObject({ left: '58px', top: '200px' });
+    expect(editor.preview.style).toMatchObject({ left: '106px', top: '222px' });
+    editor.pointer('pointerup', { clientX: 80, clientY: 90 });
+    expect(editor.apply).toHaveBeenCalledOnce();
+    expect(editor.apply.mock.calls[0]?.[2].edits[0].insert).toBe('beta\n\nalpha');
+  });
+
   it('keeps the track in CodeMirror-managed attributes across focus and selection updates', () => {
     const editor = setup('hover', true);
     editor.host.state = EditorState.create({ doc: 'alpha', extensions: [editorInfoField, editorExtension({} as Actions, new Map())] });
