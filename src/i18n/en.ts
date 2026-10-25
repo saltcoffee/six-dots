@@ -27,10 +27,12 @@ export const en = {
   enableDrag: 'Enable drag and drop', enableDragHelp: 'Keep menus and keyboard commands available when dragging is disabled.',
   handleMode: 'Show handle', handleModeHelp: 'Show one handle for the hovered block or the current cursor block.',
   hover: 'On hover', cursor: 'At cursor', defaultCallout: 'Default callout type',
+  mobileHandleHelp: 'On phones and tablets, the handle follows the cursor. Tap for actions, or hold for a moment before dragging.',
+  touchActions: 'Block actions. Tap for menu; hold, then drag to move.', dragReady: 'Ready to move. Drag the handle.',
   extractFolder: 'Extraction folder', extractFolderHelp: 'Leave empty to use the source note’s folder. Use / for the vault root.',
   saveFailed: 'Settings could not be saved. Please try again.', invalidSettings: 'Some settings were invalid and were reset to defaults.',
   futureSettings: 'These settings were saved by a newer SixDots version. They will not be overwritten.',
   includesChildren: 'Includes nested content', onlyHeading: 'Heading only', drop: 'Move block here',
-  foldHeading: 'Expand this heading before moving it.', unsupportedView: 'Use SixDots in a desktop Markdown editing view.',
+  foldHeading: 'Expand this heading before moving it.', unsupportedView: 'Use SixDots in a Markdown editing view.',
   createdId: 'Native block ID', close: 'Close', sourceKept: 'The current source and destination have been kept.',
 } as const;

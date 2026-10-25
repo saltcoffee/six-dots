@@ -4,6 +4,7 @@ import type { Translate } from '../i18n';
 import { targetPath } from '../domain/extract';
 
 export class ManagedModal extends Modal {
+  constructor(app: App) { super(app); this.modalEl.classList.add('six-dots-modal'); }
   onDismiss: () => void = () => undefined;
   onClose(): void { this.contentEl.empty(); this.onDismiss(); }
 }
@@ -24,6 +25,7 @@ export class LinkModal extends ManagedModal {
     const status = this.contentEl.createEl('p', { text: this.t('copyFailed'), attr: { role: 'status' } });
     const input = this.contentEl.createEl('textarea', { cls: 'six-dots-link', attr: { 'aria-label': this.t('linkText'), readonly: '' } });
     input.value = this.link;
+    input.addEventListener('click', () => input.select());
     new Setting(this.contentEl).addButton(button => button.setButtonText(this.t('close')).onClick(() => this.close()))
       .addButton(button => button.setButtonText(this.t('retryCopy')).setCta().onClick(async () => {
         try { await this.copy(); this.close(); } catch { status.setText(this.t('copyFailed')); input.focus(); input.select(); }

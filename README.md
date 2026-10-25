@@ -18,8 +18,8 @@ SixDots brings Notion-style block actions to Obsidian. Drag a paragraph into pla
 ## Getting started
 
 1. Open a Markdown note in **Live Preview** or **Source mode**.
-2. Hover beside a supported block to reveal its six-dot handle.
-3. **Drag** the handle to reorder the block, or **click** it to open its actions.
+2. On desktop, hover beside a supported block. On phones and tablets, tap the text to place the cursor; the handle follows the cursor.
+3. **Click or tap** the handle for block actions. To reorder, drag with a mouse, or hold the handle for about **350 ms**, then drag with a finger.
 
 A wrapped paragraph is one block. A parent list item includes its children. The insertion line shows an allowed destination; press **Esc** to cancel. Moves and formatting changes can be undone normally.
 
@@ -35,14 +35,16 @@ To install a published release manually:
 2. Put those files in `<your vault>/.obsidian/plugins/six-dots/`.
 3. Restart Obsidian and enable **SixDots** under **Settings → Community plugins**.
 
-Desktop Obsidian **1.14.5 or later** is required. This early preview has been manually tested on macOS; Windows and Linux verification is pending. Mobile and Reading view are outside the current scope.
+Obsidian **1.8.7 or later** is required. SixDots supports desktop, phones, and tablets in editing views. The plugin is compiled against the 1.8.7 API; app testing has used Obsidian 1.14.5. Mobile support is an early preview: automated touch-event tests and Obsidian mobile emulation have been checked; iOS and Android physical-device verification is pending. Desktop has been manually tested on macOS; Windows and Linux verification is pending. Reading view is outside the current scope.
+
+On mobile, scroll and select text in the note normally. Start a drag from the handle after holding it; moving too early cancels the gesture. You can also choose **Move block up/down** from its menu without dragging. Mobile always uses the cursor handle, including when settings are synced from a desktop. If automatic clipboard access fails, a dialog keeps the block link available to select and copy manually.
 
 ## Settings
 
 | Setting | Default | What it changes |
 | --- | --- | --- |
 | Enable drag and drop | On | Turn dragging off while keeping menus and commands. |
-| Show handle | On hover | Alternatively, follow the current cursor block. |
+| Show handle | On hover on desktop; at cursor on mobile | Desktop can switch modes. Mobile always follows the cursor. |
 | Default callout type | Note | Choose Note, Info, Tip, or Warning. |
 | Extraction folder | Same as source | Use an existing vault folder, or `/` for the vault root. |
 
