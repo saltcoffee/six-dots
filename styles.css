@@ -1,4 +1,4 @@
-.markdown-source-view.mod-cm6 .cm-editor.six-dots-editor .cm-scroller { padding-inline-start: var(--six-dots-track, 28px); }
+.markdown-source-view.mod-cm6 .cm-editor.six-dots-editor > .cm-scroller { padding-inline-start: var(--six-dots-track, 28px); }
 .six-dots-touch-editor { --six-dots-track: 48px; }
 .six-dots-handle {
   position: fixed;

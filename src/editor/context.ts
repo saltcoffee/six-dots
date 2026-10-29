@@ -12,7 +12,17 @@ export interface Target {
   readonly file: TFile;
   readonly path: string;
 }
+export function inTable(node: Node | null): boolean {
+  const element = node?.nodeType === 1 ? node as Element : node?.parentElement;
+  return !!element?.closest('table, .cm-table-widget');
+}
+export function tableFocused(view: EditorView): boolean {
+  const active = view.dom.ownerDocument.activeElement;
+  return !!active && view.dom.contains(active) && inTable(active);
+}
 export function fileFor(view: EditorView): TFile | null {
+  // Live Preview cells inherit editor extensions, but their documents contain only cell text.
+  if (inTable(view.dom)) return null;
   const info = view.state.field(editorInfoField, false);
   return info instanceof MarkdownView && info.getMode() === 'source' ? info.file : null;
 }

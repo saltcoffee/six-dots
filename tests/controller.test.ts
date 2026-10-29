@@ -30,7 +30,8 @@ function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false, ios = false) 
   const bounds = { left: 0, top: 0, right: 600, bottom: 400, width: 600, height: 400 };
   let captured: number | null = null;
   const element = () => Object.assign(new EventTarget(), {
-    hidden: false, className: '', textContent: '', isConnected: true, style: { left: '', top: '' },
+    hidden: false, className: '', textContent: '', isConnected: true, nodeType: 1, style: { left: '', top: '' },
+    closest: vi.fn<() => Element | null>(() => null), contains: vi.fn(() => false),
     classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() },
     setAttribute: vi.fn(), remove: vi.fn(), getBoundingClientRect: () => bounds,
     setPointerCapture: (id: number) => { captured = id; }, hasPointerCapture: (id: number) => captured === id,
@@ -42,7 +43,8 @@ function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false, ios = false) 
   const elements: ReturnType<typeof element>[] = [];
   const doc = Object.assign(new EventTarget(), {
     createElement: () => { const el = element(); elements.push(el); return el; },
-    body: { append: vi.fn() }, defaultView: win,
+    body: { append: vi.fn() }, defaultView: win, activeElement: null as ReturnType<typeof element> | null,
+    elementFromPoint: vi.fn(() => host.dom as unknown as Element),
   });
   let phase: 'idle' | 'update' | 'read' | 'write' = 'idle';
   let pending: Measurement | null = null;
@@ -78,9 +80,22 @@ function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false, ios = false) 
       const event = Object.assign(new Event(type, { cancelable: true }), { button: 0, isPrimary: true, pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 30, ...values });
       (type === 'pointerdown' ? elements[0]! : doc).dispatchEvent(event);
     },
-    hover(pos = 1) {
+    hover(pos = 1, target: EventTarget = host.dom) {
       position = pos;
-      host.dom.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 80, clientY: 30 }));
+      const event = Object.assign(new Event('pointermove'), { clientX: 80, clientY: 30 });
+      Object.defineProperty(event, 'target', { value: target });
+      host.dom.dispatchEvent(event);
+    },
+    table() {
+      const cell = element();
+      cell.closest.mockReturnValue(cell as unknown as Element);
+      return cell;
+    },
+    interact(type: string, target: EventTarget) {
+      const event = new Event(type, { cancelable: true });
+      Object.defineProperty(event, 'target', { value: target });
+      host.dom.dispatchEvent(event);
+      return event;
     },
     pointAt(pos: number) { position = pos; },
     update(spec: TransactionSpec = {}, geometryChanged = false) {
@@ -166,6 +181,172 @@ describe('handle layout lifecycle', () => {
     editor.measure();
     expect(editor.button.hidden).toBe(false);
     expect(editor.button.style.top).toBe(mode === 'cursor' ? '58px' : '18px');
+  });
+});
+
+describe('table interaction boundary', () => {
+  describe.each([
+    { container: 'root', text: 'parent\n\n| a | b |\n|---|---|\n|x|y|\n\nafter' },
+    { container: 'quote', text: '> parent\n>\n> | a | b |\n> |---|---|\n> |x|y|\n>\n> after' },
+    { container: 'callout', text: '> [!note] parent\n>\n> | a | b |\n> |---|---|\n> |x|y|\n>\n> after' },
+    { container: 'CRLF callout', text: '> [!note] parent\r\n>\r\n> | a | b |\r\n> |---|---|\r\n> |x|y|\r\n>\r\n> after' },
+    { container: 'list item', text: '- parent\n\n  | a | b |\n  |---|---|\n  |x|y|\n\n  after' },
+  ])('raw Markdown tables in $container', ({ container, text }) => {
+    it.each(['hover', 'cursor', 'mobile'] as const)('protects table positions and restores parent actions in %s mode', async mode => {
+      const editor = setup(mode === 'cursor' ? 'cursor' : 'hover', mode === 'mobile');
+      const parent = text.indexOf('parent');
+      editor.update({ changes: { from: 0, to: editor.host.state.doc.length, insert: text }, selection: { anchor: parent } });
+      await vi.runAllTimersAsync(); editor.hover(parent); editor.measure();
+      // CodeMirror normalizes line endings; hit tests use its document offsets.
+      const source = editor.host.state.doc.toString();
+      expect(editor.button.hidden).toBe(false);
+      const target = editor.controller.peek()!;
+      expect(target).not.toBeNull();
+      const cell = source.indexOf('x');
+      editor.update({ selection: { anchor: cell } }); editor.hover(cell); editor.measure();
+      editor.host.scrollDOM.dispatchEvent(new Event('scroll')); editor.measure();
+      editor.viewport.dispatchEvent(new Event('resize')); editor.measure();
+      expect(editor.button.hidden).toBe(true);
+      expect(editor.controller.peek()).toBeNull();
+      editor.controller.openMenu(); editor.controller.openMenu(true);
+      expect(editor.showMenu).not.toHaveBeenCalled();
+      const after = source.indexOf('after');
+      editor.update({ selection: { anchor: after } }); editor.hover(after); editor.measure();
+      expect(editor.button.hidden).toBe(false);
+      const afterTarget = editor.controller.peek();
+      expect(afterTarget?.block.text).toContain('after');
+      if (container !== 'root') expect(afterTarget?.block).toBe(target.block);
+      editor.controller.openMenu();
+      expect(editor.showMenu.mock.calls[0]?.[1].block).toBe(afterTarget?.block);
+    });
+  });
+
+  it('does not add a handle or editor track to a nested table cell editor', async () => {
+    const editor = setup('cursor');
+    editor.host.dom.closest.mockReturnValue(editor.table() as unknown as Element);
+    await vi.runAllTimersAsync(); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+    expect(editor.controller.peek()).toBeNull();
+    editor.controller.openMenu(true);
+    expect(editor.showMenu).not.toHaveBeenCalled();
+
+    const state = EditorState.create({ extensions: [editorExtension({} as Actions, new Map())] });
+    const attributes = state.facet(EditorView.editorAttributes)[0]!;
+    expect(typeof attributes === 'function' ? attributes(editor.host as unknown as EditorView) : attributes).toBeNull();
+  });
+
+  it.each(['hover', 'cursor', 'mobile'] as const)('clears the previous target on table entry in %s mode', async mode => {
+    const editor = setup(mode === 'cursor' ? 'cursor' : 'hover', mode === 'mobile');
+    await vi.runAllTimersAsync(); editor.hover(); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+
+    const cell = editor.table();
+    expect(editor.interact('pointerdown', cell).defaultPrevented).toBe(false);
+    expect(editor.button.hidden).toBe(true);
+    editor.controller.openMenu();
+    expect(editor.showMenu).not.toHaveBeenCalled();
+
+    editor.doc.activeElement = cell; editor.host.dom.contains.mockReturnValue(true);
+    editor.interact('focusin', cell); editor.measure();
+    editor.host.scrollDOM.dispatchEvent(new Event('scroll')); editor.measure();
+    editor.viewport.dispatchEvent(new Event('resize')); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+    expect(editor.controller.peek()).toBeNull();
+
+    editor.doc.activeElement = null;
+    editor.interact('focusin', editor.host.dom); editor.hover(8); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+  });
+
+  it('closes an old menu and cancels a pending hold without consuming native table events', async () => {
+    const editor = setup('hover', true);
+    await vi.runAllTimersAsync(); editor.measure();
+    editor.controller.openMenu();
+    const menu = editor.showMenu.mock.results[0]!.value;
+    const cell = editor.table();
+    expect(editor.interact('focusin', cell).defaultPrevented).toBe(false);
+    expect(menu.hide).toHaveBeenCalledOnce();
+
+    editor.interact('focusin', editor.host.dom); editor.measure();
+    editor.pointer('pointerdown');
+    editor.interact('pointerdown', cell);
+    await vi.advanceTimersByTimeAsync(400); editor.pointer('pointerup');
+    expect(editor.button.classList.add).not.toHaveBeenCalledWith('is-ready');
+    expect(editor.showMenu).toHaveBeenCalledOnce();
+    expect(editor.apply).not.toHaveBeenCalled();
+  });
+
+  it('restores hover actions over normal text while a table cell still has the caret', async () => {
+    const editor = setup();
+    await vi.runAllTimersAsync();
+    editor.doc.activeElement = editor.table(); editor.host.dom.contains.mockReturnValue(true);
+    editor.interact('focusin', editor.doc.activeElement); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+    expect(editor.controller.peek()).toBeNull();
+    editor.hover(8); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+    editor.controller.openMenu();
+    expect(editor.showMenu.mock.calls[0]?.[1].block.text).toBe('beta');
+  });
+
+  it('does not suppress cursor actions because another editor is focused in a table', async () => {
+    const editor = setup('cursor');
+    editor.doc.activeElement = editor.table();
+    await vi.runAllTimersAsync(); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+    expect(editor.controller.peek()?.block.text).toBe('alpha');
+  });
+
+  it('ignores table hover and rechecks the DOM when scrolling moves a table under the pointer', async () => {
+    const editor = setup();
+    await vi.runAllTimersAsync(); editor.hover(); editor.measure();
+    const cell = editor.table();
+    editor.hover(8, cell); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+
+    editor.hover(); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+    // CodeMirror may map a rendered widget to nearby source text. The DOM still owns the hit.
+    editor.doc.elementFromPoint.mockReturnValue(cell as unknown as Element);
+    editor.host.scrollDOM.dispatchEvent(new Event('scroll')); editor.measure();
+    expect(editor.button.hidden).toBe(true);
+    editor.controller.openMenu();
+    expect(editor.showMenu).not.toHaveBeenCalled();
+
+    editor.doc.elementFromPoint.mockReturnValue(editor.host.dom as unknown as Element);
+    editor.hover(8); editor.measure();
+    expect(editor.button.hidden).toBe(false);
+  });
+
+  it('rejects a drop over a table cell even when source hit testing returns a nearby block', async () => {
+    const editor = setup();
+    await vi.runAllTimersAsync(); editor.hover(); editor.measure();
+    editor.pointer('pointerdown', { pointerType: 'mouse' });
+    editor.pointAt(10);
+    editor.doc.elementFromPoint.mockReturnValue(editor.table() as unknown as Element);
+    editor.pointer('pointermove', { pointerType: 'mouse', clientX: 80, clientY: 90 });
+    await vi.advanceTimersByTimeAsync(16);
+    expect(editor.indicator.hidden).toBe(true);
+    editor.pointer('pointerup', { pointerType: 'mouse', clientX: 80, clientY: 90 });
+    expect(editor.apply).not.toHaveBeenCalled();
+    expect(editor.host.state.doc.toString()).toBe('alpha\n\nbeta');
+  });
+
+  it.each([
+    'alpha\n\n> parent\n>\n> | a | b |\n> |---|---|\n> |x|y|',
+    'alpha\n\n> [!note] parent\n>\n> | a | b |\n> |---|---|\n> |x|y|',
+    '- alpha\n- parent\n\n  | a | b |\n  |---|---|\n  |x|y|',
+  ])('rejects a source-table drop without a rendered table DOM: %s', async text => {
+    const editor = setup();
+    editor.update({ changes: { from: 0, to: editor.host.state.doc.length, insert: text } });
+    await vi.runAllTimersAsync(); editor.hover(); editor.measure();
+    editor.pointer('pointerdown', { pointerType: 'mouse' }); editor.pointAt(text.indexOf('x'));
+    editor.pointer('pointermove', { pointerType: 'mouse', clientX: 80, clientY: 90 });
+    await vi.advanceTimersByTimeAsync(16);
+    expect(editor.indicator.hidden).toBe(true);
+    editor.pointer('pointerup', { pointerType: 'mouse', clientX: 80, clientY: 90 });
+    expect(editor.apply).not.toHaveBeenCalled();
+    expect(editor.host.state.doc.toString()).toBe(text);
   });
 });
 

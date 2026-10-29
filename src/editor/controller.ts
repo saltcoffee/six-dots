@@ -2,11 +2,11 @@ import { EditorView, ViewPlugin } from '@codemirror/view';
 import type { ViewUpdate } from '@codemirror/view';
 import { Platform, setIcon } from 'obsidian';
 import type { Menu } from 'obsidian';
-import { atPosition, siblingBlocks } from '../domain/block';
+import { atPosition, isTablePosition, siblingBlocks } from '../domain/block';
 import type { Block, Plan } from '../domain/block';
 import { move } from '../domain/move';
 import { Actions } from '../obsidian/actions';
-import { editable, targetFor, fileFor } from './context';
+import { editable, targetFor, fileFor, inTable, tableFocused } from './context';
 import type { Target } from './context';
 import { SnapshotCache } from './snapshot-cache';
 import { fitPoint, intersect, toFixedPoint, viewportBounds } from './viewport';
@@ -48,6 +48,7 @@ export class Controller {
     for (const element of [this.button, this.indicator, this.preview]) element.hidden = true;
     doc.body.append(this.button, this.indicator, this.preview, this.status);
     this.listen(view.dom, 'pointermove', event => this.hover(event as PointerEvent));
+    this.listen(view.dom, 'pointerdown', event => { if (inTable(event.target as Node | null)) this.clearTarget(); }, true);
     this.listen(view.dom, 'pointerleave', () => this.hideLater());
     this.listen(view.scrollDOM, 'scroll', () => { this.measure(); if (this.drag?.active) this.findDrop(); });
     this.listen(this.button, 'pointerenter', () => this.clearHide());
@@ -69,7 +70,7 @@ export class Controller {
     });
     this.listen(view.dom, 'compositionstart', () => { this.cancel(); this.block = null; this.button.hidden = true; });
     this.listen(doc, 'keydown', event => { if ((event as KeyboardEvent).key === 'Escape' && this.drag) { event.preventDefault(); this.cancel(); } });
-    this.listen(view.dom, 'focusin', () => this.refresh());
+    this.listen(view.dom, 'focusin', event => { if (inTable(event.target as Node | null)) this.clearTarget(); else this.refresh(); });
     this.listen(view.dom, 'focusout', () => this.measure());
     if (doc.defaultView) {
       this.listen(doc.defaultView, 'blur', () => this.cancel()); this.listen(doc.defaultView, 'resize', () => this.measure());
@@ -98,16 +99,23 @@ export class Controller {
     if (update.viewportChanged || update.geometryChanged) this.measure();
   }
   refresh(): void {
-    if (this.disposed || this.drag || this.menu) return;
+    if (this.disposed) return;
+    if (this.cursorHandle && tableFocused(this.view)) { this.clearTarget(); return; }
+    if (this.drag || this.menu) return;
     if (!editable(this.view)) { this.block = null; this.button.hidden = true; return; }
     this.measure();
   }
   private hover(event: PointerEvent): void {
     if (this.drag || this.menu || this.cursorHandle || event.pointerType === 'touch') return;
+    if (inTable(event.target as Node | null)) { this.clearTarget(); return; }
     this.clearHide(); this.point = { x: event.clientX, y: event.clientY };
     this.refresh();
   }
   private clearHide(): void { if (this.hideTimer !== null) clearTimeout(this.hideTimer); this.hideTimer = null; }
+  private clearTarget(): void {
+    this.menu?.hide(); this.cancel(); this.clearHide();
+    this.point = null; this.block = null; this.button.hidden = true;
+  }
   private hideLater(): void {
     this.clearHide();
     if (this.cursorHandle) return;
@@ -119,13 +127,16 @@ export class Controller {
       key: this,
       read: view => {
         if (this.disposed) return null;
-        if (!editable(view)) { this.block = null; return null; }
+        if (!editable(view) || this.cursorHandle && tableFocused(view)) { this.block = null; return null; }
         if (this.touchUI && !view.hasFocus && !this.menu && !this.drag && view.dom.ownerDocument.activeElement !== this.button) return null;
         // Selection updates run before DOM writes finish; resolve hover coordinates in the read phase.
         if (!this.drag && !this.menu) {
           const snapshot = this.cache.snapshot;
+          // Rendered tables can map to nearby source text. Let the DOM reject that hit first.
+          const point = this.point;
+          const table = point && inTable(view.dom.ownerDocument.elementFromPoint(point.x, point.y));
           const pos = this.cursorHandle ? view.state.selection.main.head
-            : this.point && snapshot ? view.posAtCoords(this.point) : null;
+            : point && snapshot && !table ? view.posAtCoords(point) : null;
           this.block = pos === null || !snapshot ? null : atPosition(snapshot, pos);
         }
         const block = this.block;
@@ -157,6 +168,7 @@ export class Controller {
     return win ? toFixedPoint(win, point, Platform.isIosApp) : point;
   }
   current(): Target | null {
+    if (tableFocused(this.view)) { this.actions.notify(this.actions.t('unsupported')); return null; }
     if (!editable(this.view)) { this.actions.notify(this.actions.t('selectOne')); return null; }
     const snapshot = this.cache.snapshot;
     if (!snapshot) { this.actions.notify(this.actions.t('preparing')); return null; }
@@ -165,7 +177,7 @@ export class Controller {
     return targetFor(this.view, block, snapshot);
   }
   peek(): Target | null {
-    if (!editable(this.view) || !this.cache.snapshot) return null;
+    if (!editable(this.view) || tableFocused(this.view) || !this.cache.snapshot) return null;
     const block = atPosition(this.cache.snapshot, this.view.state.selection.main.head);
     return block ? targetFor(this.view, block, this.cache.snapshot) : null;
   }
@@ -238,9 +250,11 @@ export class Controller {
     drag.plan = null; this.indicator.hidden = true;
     const bounds = this.visibleBounds();
     if (!bounds || drag.currentX < bounds.left || drag.currentX > bounds.right || drag.currentY < bounds.top || drag.currentY > bounds.bottom) return;
+    if (inTable(this.view.dom.ownerDocument.elementFromPoint(drag.currentX, drag.currentY))) return;
     const track = this.touchUI ? 48 : 28;
     const pos = this.view.posAtCoords({ x: Math.min(bounds.right - 2, Math.max(bounds.left + track + 4, drag.currentX)), y: drag.currentY });
-    if (pos === null || pos >= drag.target.block.from && pos <= drag.target.block.to) return;
+    if (pos === null || isTablePosition(drag.target.snapshot, pos)) return;
+    if (pos >= drag.target.block.from && pos <= drag.target.block.to) return;
     const siblings = siblingBlocks(drag.target.snapshot, drag.target.block);
     const candidate = siblings.find(block => block.from <= pos && pos <= block.to)
       ?? [...siblings].sort((a, b) => Math.min(Math.abs(a.from - pos), Math.abs(a.to - pos)) - Math.min(Math.abs(b.from - pos), Math.abs(b.to - pos)))[0];

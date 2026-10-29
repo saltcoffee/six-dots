@@ -57,6 +57,7 @@ The interface uses Chinese when Obsidian is set to a Chinese locale. Every other
 - Formatting options depend on the block. Headings require a single source line; list items starting with text can switch between ordinary bullets and standard tasks. Items starting with code, quotes, or headings do not offer formatting or new block IDs.
 - Compact nested lists sharing one source line, such as `- - child`, are protected from local block actions.
 - Tables, math, frontmatter, comments, and unsupported structures are protected. Their contents cannot be partially dragged out.
+- On desktop and mobile, SixDots hides its handle and does not offer ordinary block actions inside tables, including tables nested in quotes, callouts, and lists in Source mode. Use Obsidian's native controls for table rows and columns. From parent text outside the table, you can still act on the complete parent block, including its table.
 - Hovering, menus, and previews do not modify your note. Formatting writes the corresponding native Markdown.
 - **Creating a block link adds a native `^block-id`.** Copied links use a full vault-path Wikilink, even if your usual preference is Markdown links. They are intended for this vault. Undoing a newly created ID invalidates that link.
 - Blocks containing IDs cannot be converted or extracted in this version. Extraction also excludes subtrees with headings or dependencies that cannot be safely moved.
