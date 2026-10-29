@@ -35,6 +35,40 @@ function setup(filter?: 'reject' | 'rewrite') {
   return { view, target, plan };
 }
 describe('real CM transactions with a minimal host boundary', () => {
+  it.each(['move', 'task', 'bullet', 'id'] as const)('keeps %s between separate keyboard edits and restores a nonzero caret', action => {
+    const { view } = setup();
+    view.dispatch(view.state.update({ changes: { from: 5, insert: '!' }, selection: { anchor: 3 } }));
+    const before = view.state.doc.toString();
+    const snapshot = parseSnapshot(before), source = snapshot.roots[0]!;
+    const target = targetFor(view as unknown as EditorView, source, snapshot)!;
+    const format = action === 'task' || action === 'bullet' ? action : undefined;
+    const plan = action === 'move' ? moveBy(snapshot, source, 1) : format
+      ? convert(source, format, snapshot, 3) : addBlockId(source, 'new-id');
+    expect(dispatchPlan(view as unknown as EditorView, target, plan!, format)).toBe('applied');
+    const after = view.state.doc.toString();
+    view.dispatch(view.state.update({ changes: { from: view.state.doc.length, insert: '?' } }));
+    undo({ state: view.state, dispatch: transaction => view.dispatch(transaction) });
+    expect(view.state.doc.toString()).toBe(after);
+    undo({ state: view.state, dispatch: transaction => view.dispatch(transaction) });
+    expect(view.state.doc.toString()).toBe(before);
+    expect(view.state.selection.main.head).toBe(3);
+    undo({ state: view.state, dispatch: transaction => view.dispatch(transaction) });
+    expect(view.state.doc.toString()).toBe('alpha\n\nbeta');
+    redo({ state: view.state, dispatch: transaction => view.dispatch(transaction) });
+    redo({ state: view.state, dispatch: transaction => view.dispatch(transaction) });
+    expect(view.state.doc.toString()).toBe(after);
+  });
+
+  it.each(['replace', 'rename', 'read-only'] as const)('rejects a target after a %s without modifying its current document', change => {
+    const { view, target, plan } = setup();
+    if (change === 'replace') Object.assign(view.state.field(editorInfoField)!, { file: { path: target.path } });
+    if (change === 'rename') target.file.path = 'Renamed.md';
+    if (change === 'read-only') view.state = EditorState.create({ doc: view.state.doc, extensions: [editorInfoField, EditorState.readOnly.of(true)] });
+    const before = view.state.doc.toString();
+    expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('rejected');
+    expect(view.state.doc.toString()).toBe(before);
+  });
+
   it('creates an isolated, undoable move and restores selection', () => {
     const { view, target, plan } = setup();
     expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('applied');

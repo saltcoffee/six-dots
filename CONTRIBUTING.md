@@ -8,6 +8,10 @@ Test in a separate vault by copying `main.js`, `manifest.json`, and `styles.css`
 
 For mobile changes, verify tap actions, hold-then-drag, early movement, multiple touches, keyboard resizing, and narrow dialogs. Record whether testing used mobile emulation or a physical iOS/Android device.
 
+`npm run fixtures` generates deterministic artificial benchmark notes and their checksums under the ignored `docs/0.1.4/fixtures/` directory. The mixed note has 10,000 lines; deep lists cover three depths. Giant single-block notes measure preparation and location, while separate variants add a sibling for legal move measurements. Do not count a no-op as a completed move. Keep UI measurements separate from parser microbenchmarks, and record the host version, visibility, mode, sample checksum, repetitions, and raw timings.
+
+Before publishing, verify the four existing action families, cancellation, undo, and unloading in real macOS instances of Obsidian 1.8.7 and the stable host used for the release. Changes affecting iOS or Android require physical-device verification on each affected platform; emulation does not replace it. Keep unfinished release entries marked Unreleased until those gates pass.
+
 Keep source files under 600 lines. Put text transformations in `src/domain`, editor state and geometry in `src/editor`, and host operations in `src/obsidian`. Keep user text in both translation dictionaries: Chinese locales use Chinese; all others use English.
 
 Open a focused pull request against `main`. Explain what changes for users and how you tested it. The required `quality` check must pass. Do not commit generated `main.js`, `dist`, or local `docs`.

@@ -26,7 +26,7 @@ export class Actions {
   private extracting = new Set<TFile>();
   constructor(readonly app: App, readonly t: Translate, readonly settings: () => Settings) {}
 
-  notify(message: string): void { new Notice(message); }
+  notify(message: string): void { if (this.alive) new Notice(message); }
   error(error: unknown): void { this.notify(this.t(error instanceof BlockError ? error.reason : 'failed')); }
   valid(view: EditorView, target: Target): boolean { return this.alive && targetValid(view, target) && this.app.vault.getAbstractFileByPath(target.path) === target.file; }
   apply(view: EditorView, target: Target, plan: Plan | null, format?: Format): boolean {
@@ -57,19 +57,27 @@ export class Actions {
     try { this.apply(view, target, moveBy(target.snapshot, target.block, direction)); } catch (error) { this.error(error); }
   }
   showMenu(view: EditorView, target: Target, point: { x: number; y: number }, onHide: () => void): Menu {
-    const menu = new Menu(), { block } = target, t = this.t;
+    // Keep Escape and focus handling in the originating document, including popout windows.
+    let escape = false;
+    const onKey: EventListener = event => {
+      if ((event as KeyboardEvent).key !== 'Escape') return;
+      escape = true; event.preventDefault(); event.stopImmediatePropagation(); menu.hide();
+    };
+    // Own Escape before host scopes can restore the handle's previous focus.
+    const keyboardTarget = view.dom.ownerDocument.defaultView ?? view.dom.ownerDocument;
+    keyboardTarget.addEventListener('keydown', onKey, true);
+    const menu = new Menu().setUseNativeMenu(false), { block } = target, t = this.t;
     const heading = /^ {0,3}(#{1,6})(?:\s|$)/.exec(block.text)?.[1]?.length;
     const callout = /^\s*>\s*\[!([^\]]+)\]/.exec(block.text)?.[1]?.toLowerCase();
     const current = block.kind === 'paragraph' ? 'paragraph' : block.kind === 'heading' ? `h${heading}`
       : block.kind === 'list-item' && block.marker?.number === null ? block.marker.task === null ? 'bullet' : 'task'
       : block.kind === 'callout' ? `callout:${callout}` : block.kind;
     this.menus.add(menu);
-    let escape = false;
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') escape = true; };
-    view.dom.ownerDocument.addEventListener('keydown', onKey, true);
     menu.onHide(() => {
-      this.menus.delete(menu); view.dom.ownerDocument.removeEventListener('keydown', onKey, true);
-      onHide(); if (escape && view.dom.isConnected) view.focus();
+      this.menus.delete(menu); keyboardTarget.removeEventListener('keydown', onKey, true);
+      onHide();
+      // Complete focus restoration after the menu has finished its dismissal.
+      if (escape) queueMicrotask(() => { if (this.alive && view.dom.isConnected) view.focus(); });
     });
     const knownCallout = callout && ['note', 'info', 'tip', 'warning'].includes(callout) ? t(callout as 'note' | 'info' | 'tip' | 'warning') : callout;
     menu.addItem(item => item.setTitle(block.kind === 'callout' ? `${t('callout')}: ${knownCallout}` : t(block.kind)).setIsLabel(true));
@@ -99,7 +107,10 @@ export class Actions {
     menu.showAtPosition(point, view.dom.ownerDocument);
     return menu;
   }
-  private open(modal: ManagedModal): void { this.modals.add(modal); modal.onDismiss = () => this.modals.delete(modal); modal.open(); }
+  private open(modal: ManagedModal): void {
+    if (!this.alive) return;
+    this.modals.add(modal); modal.onDismiss = () => this.modals.delete(modal); modal.open();
+  }
   copyLink(view: EditorView, target: Target, explicit: boolean): void {
     if (!this.valid(view, target)) { this.notify(this.t('changed')); return; }
     const reason = blockLinkReason(target.block);
@@ -112,6 +123,7 @@ export class Actions {
       const link = canonicalBlockLink(target.path, id);
       if (!target.block.ownId && !this.apply(view, target, addBlockId(target.block, id))) return;
       const copy = async () => {
+        if (!this.alive) return;
         const clipboard = view.dom.ownerDocument.defaultView?.navigator.clipboard;
         if (!clipboard) throw new Error('Clipboard unavailable');
         await clipboard.writeText(link);
@@ -127,6 +139,7 @@ export class Actions {
     return id;
   }
   extract(view: EditorView, target: Target): void {
+    if (!this.valid(view, target)) { this.notify(this.t('changed')); return; }
     const reason = extractionReason(target.block);
     if (reason) { this.notify(this.t(reason)); return; }
     const configured = this.settings().folder;
@@ -134,15 +147,16 @@ export class Actions {
     let hasCreated = false;
     const modal = new ExtractModal(this.app, this.t, { name: defaultName(target.block.text, this.t('note')), folder, summary: target.block.text }, async (name, destination, active) => {
       const reject = (key: Message, retryable = true) => ({ message: this.t(key), retryable });
-      if (hasCreated || !this.valid(view, target)) return reject('changed', false);
+      if (hasCreated || !active() || !this.valid(view, target)) return reject('changed', false);
       let path: string, content: string;
       try {
         path = targetPath(destination, name);
         const parent = destination ? this.app.vault.getAbstractFileByPath(destination) : this.app.vault.getRoot();
         if (!(parent instanceof TFolder)) return reject('badPath');
         if (parent.children.some(file => file.name.toLocaleLowerCase() === path.split('/').at(-1)?.toLocaleLowerCase())) return reject('conflict');
-        content = rewriteLinks(extractedText(target.block), target.path, path, (link, source) => this.app.metadataCache.getFirstLinkpathDest(link, source));
-      } catch { return reject('unresolvedLink'); }
+      } catch { return reject('badPath'); }
+      try { content = rewriteLinks(extractedText(target.block), target.path, path, (link, source) => this.app.metadataCache.getFirstLinkpathDest(link, source)); }
+      catch { return reject('unresolvedLink'); }
       if (this.extracting.has(target.file)) return reject('working');
       this.extracting.add(target.file);
       let created: TFile | null = null;
@@ -170,19 +184,23 @@ export class Actions {
             return this.commit(view, target, extractionPlan(target.block, link));
           },
         });
-        if (this.alive && created) this.extractionNotice(view.dom.ownerDocument, path, result === 'success' ? 'extracted' : result === 'diverged' ? 'diverged' : result === 'target-changed' ? 'targetChanged' : 'partial');
+        if (this.alive && (created || result === 'creation-unknown')) this.extractionNotice(view.dom.ownerDocument, path,
+          result === 'creation-unknown' ? 'unknownCreate' : result === 'success' ? 'extracted' : result === 'diverged' ? 'diverged' : result === 'target-changed' ? 'targetChanged' : 'partial');
         if (result === 'success') return null;
-        return reject(result === 'creation-unknown' ? 'unknownCreate' : result === 'create-failed' ? 'failed' : result === 'diverged' ? 'diverged' : result === 'target-changed' ? 'targetChanged' : 'partial', result === 'create-failed');
+        if (result === 'creation-unknown') return { message: `${this.t('unknownCreate')} ${path}`, retryable: false };
+        return reject(result === 'create-failed' ? 'failed' : result === 'diverged' ? 'diverged' : result === 'target-changed' ? 'targetChanged' : 'partial',
+          result === 'create-failed' && active() && this.valid(view, target));
       } finally { this.extracting.delete(target.file); }
     });
     this.open(modal);
   }
-  private extractionNotice(doc: Document, path: string, key: 'extracted' | 'partial' | 'targetChanged' | 'diverged'): void {
+  private extractionNotice(doc: Document, path: string, key: 'extracted' | 'partial' | 'targetChanged' | 'diverged' | 'unknownCreate'): void {
     const fragment = doc.createDocumentFragment();
     fragment.createEl('span', { text: `${this.t(key)} ${path} ` });
     fragment.createEl('a', { text: this.t('openNote'), href: '#' }).addEventListener('click', event => {
       event.preventDefault(); const file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) void this.app.workspace.getLeaf(true).openFile(file);
+      else this.notify(this.t('missingNote'));
     });
     new Notice(fragment, key === 'extracted' ? 8000 : 0);
   }

@@ -29,6 +29,7 @@ export class SnapshotCache {
 
   cancel(): void {
     this.generation++;
+    this.snapshot = null;
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
   }

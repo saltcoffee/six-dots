@@ -23,7 +23,7 @@ export const en = {
   conflict: 'That name already exists. Choose another name.', badPath: 'Choose an existing vault folder and a valid cross-platform note name.',
   unresolvedLink: 'This block contains links or dependencies that cannot be safely moved.',
   targetChanged: 'The destination changed. The source was not replaced; inspect both notes.',
-  openNote: 'Open new note', sourcePreview: 'Source replacement',
+  openNote: 'Open new note', missingNote: 'The note was not found. Check the target path before retrying.', sourcePreview: 'Source replacement',
   enableDrag: 'Enable drag and drop', enableDragHelp: 'Keep menus and keyboard commands available when dragging is disabled.',
   handleMode: 'Show handle', handleModeHelp: 'Show one handle for the hovered block or the current cursor block.',
   hover: 'On hover', cursor: 'At cursor', defaultCallout: 'Default callout type',

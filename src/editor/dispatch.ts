@@ -19,8 +19,9 @@ export function dispatchPlan(view: EditorView, target: Target, plan: Plan, forma
     if (text.slice(0, candidate.frontmatterEnd) !== target.snapshot.text.slice(0, target.snapshot.frontmatterEnd)) throw new BlockError('unsafe');
     const cursor = Math.min(plan.cursor, expected.length);
     if (format) {
-      const result = candidate.blocks.find(block => block.from <= cursor && cursor <= block.contentTo);
       const kind = format.startsWith('h') ? 'heading' : format.startsWith('callout:') ? 'callout' : format === 'bullet' || format === 'task' ? 'list-item' : format;
+      // A single-item list and its item can have identical spans. Validate the expected family.
+      const result = candidate.blocks.find(block => block.kind === kind && block.from <= cursor && cursor <= block.contentTo);
       if (result?.kind !== kind) throw new BlockError('unsafe');
       if ((format === 'task' || format === 'bullet') && (!result.marker?.textRange || (format === 'task') !== (result.marker.task !== null))) throw new BlockError('unsafe');
     } else {
