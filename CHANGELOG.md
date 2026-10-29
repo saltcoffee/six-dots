@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.4 - 2026-10-30
+
+- Invalidate open block actions and pending drags when a note is switched or renamed, including when its text does not change.
+- Prevent destroyed editor controllers and unloaded plugin instances from reopening actions or continuing stale work.
+- Keep keyboard and assistive activation events from immediately dismissing the block menu they just opened.
+- Use Obsidian's menu renderer so keyboard dismissal and focus handling stay in the originating window.
+- Refresh touch-handle visibility when focus leaves the handle itself, while keeping a focused handle usable.
+- Reject drops outside the source list or without a visible insertion boundary instead of reusing a hidden or redirected move plan.
+- Fix paragraph-to-task and paragraph-to-bullet conversions being rejected when a single-item list shares its range with its container.
+- Preserve editable extraction inputs for invalid names, folders, and conflicts; stop closed operations before file creation.
+- Keep the target path available when note creation has an uncertain result, and report missing targets when opening recovery links.
+- Add lifecycle, extraction fault, undo-isolation, and snapshot-cancellation coverage, plus reproducible artificial performance fixtures.
+
+Known verification limits: the latest desktop UI regression did not confirm Escape focus restoration; the final adjustment still needs a passing real-host result. Native IME, complete performance profiling, and affected iOS/Android physical-device checks remain incomplete.
+
 ## 0.1.3 - 2026-10-25
 
 - Normalize iOS visual-viewport coordinates for handles, drop indicators, and drag previews when the keyboard shifts the viewport.

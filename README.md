@@ -23,6 +23,8 @@ SixDots brings Notion-style block actions to Obsidian. Drag a paragraph into pla
 
 A wrapped paragraph is one block. A parent list item includes its children. The insertion line shows an allowed destination; press **Esc** to cancel. Moves and formatting changes can be undone normally.
 
+Switching or renaming a note invalidates its open actions and pending drag. Start again in the current note. If extraction cannot confirm whether a note was created, its feedback keeps the target path available; inspect the source and destination before starting another extraction.
+
 For keyboard access, open the command palette and search for **SixDots: Open block actions**. Other commands move blocks up or down, convert to a task or callout, copy a block link, and extract to a new note. No shortcuts are assigned by default.
 
 ## Installation
@@ -35,9 +37,11 @@ To install a published release manually:
 2. Put those files in `<your vault>/.obsidian/plugins/six-dots/`.
 3. Restart Obsidian and enable **SixDots** under **Settings → Community plugins**.
 
-Obsidian **1.8.7 or later** is required. SixDots supports desktop, phones, and tablets in editing views. The plugin is compiled against the 1.8.7 API; app testing has used Obsidian 1.14.5. Mobile support is an early preview: automated touch-event tests and Obsidian mobile emulation have been checked; iOS and Android physical-device verification is pending. Desktop has been manually tested on macOS; Windows and Linux verification is pending. Reading view is outside the current scope.
+Obsidian **1.8.7 or later** is required. SixDots supports desktop, phones, and tablets in editing views. The plugin is compiled against the 1.8.7 API; key actions, undo, and unloading have been tested on macOS with Obsidian 1.8.7 and 1.14.5. Mobile support is an early preview: automated touch-event tests and Obsidian mobile emulation have been checked; iOS and Android physical-device verification is pending. Desktop has been manually tested on macOS; Windows and Linux verification is pending. Reading view is outside the current scope.
 
 On mobile, scroll and select text in the note normally. Start a drag from the handle after holding it; moving too early cancels the gesture. You can also choose **Move block up/down** from its menu without dragging. Mobile always uses the cursor handle, including when settings are synced from a desktop. If automatic clipboard access fails, a dialog keeps the block link available to select and copy manually.
+
+Version 0.1.4 verification limits: the latest desktop UI regression did not confirm focus restoration after closing the menu with Esc; the final adjustment still needs a passing real-host result. Native IME and complete performance profiling also remain unverified.
 
 ## Settings
 

@@ -25,7 +25,7 @@ export const zh: Record<keyof typeof en, string> = {
   conflict: '该名称已存在，请使用其他名称。', badPath: '请选择库内已有目录，并使用跨平台有效的笔记名称。',
   unresolvedLink: '当前块包含无法安全迁移的链接或依赖。',
   targetChanged: '目标内容已变化，源内容未替换，请核对两份笔记。',
-  openNote: '打开新笔记', sourcePreview: '源位置将保留',
+  openNote: '打开新笔记', missingNote: '未找到该笔记，请核对目标路径后再重试。', sourcePreview: '源位置将保留',
   enableDrag: '启用拖拽排序', enableDragHelp: '关闭后仍可使用菜单和键盘命令。',
   handleMode: '手柄显示方式', handleModeHelp: '为悬停块或当前光标块显示一个手柄。',
   hover: '悬停时显示', cursor: '跟随光标', defaultCallout: '默认标注类型',

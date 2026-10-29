@@ -28,6 +28,7 @@ export default class SixDots extends Plugin {
     else if (decoded.invalid) new Notice(this.t('invalidSettings'));
     this.actions = new Actions(this.app, this.t, () => this.settings);
     this.registerEditorExtension(editorExtension(this.actions, this.controllers));
+    this.registerEvent(this.app.vault.on('rename', () => this.controllers.forEach(controller => controller.refresh())));
     this.addSettingTab(new SixDotsSettingsTab(this.app, { plugin: this, settings: this.settings, t: this.t,
       save: () => this.saveSettings(), refresh: () => this.controllers.forEach(controller => controller.refresh()) }));
     const commands = [
@@ -64,5 +65,8 @@ export default class SixDots extends Plugin {
     const save = this.pendingSave.catch(() => undefined).then(() => this.saveData(snapshot));
     this.pendingSave = save; return save;
   }
-  onunload(): void { this.actions?.destroy(); }
+  onunload(): void {
+    this.actions?.destroy();
+    this.controllers.forEach(controller => controller.destroy());
+  }
 }
