@@ -25,7 +25,7 @@ function setup(filter?: 'reject' | 'rewrite') {
   const effects = filter ? EditorState.transactionFilter.of(() => filter === 'reject' ? [] : { changes: { from: 0, to: 1, insert: 'Unexpected' } }) : [];
   const view = {
     state: EditorState.create({ doc: 'alpha\n\nbeta', extensions: [editorInfoField, history(), effects] }),
-    dom: { isConnected: true }, composing: false, focus: vi.fn(),
+    dom: { isConnected: true, nodeType: 1, closest: vi.fn<() => Element | null>(() => null) }, composing: false, focus: vi.fn(),
     dispatch(transaction: Transaction) { this.state = transaction.state; },
   };
   const snapshot = parseSnapshot(view.state.doc.toString());
@@ -66,6 +66,13 @@ describe('real CM transactions with a minimal host boundary', () => {
     expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('rejected');
     view.dom.isConnected = false;
     expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('rejected');
+  });
+  it('rejects cell-local targets and stale edits once an editor is attached inside a table', () => {
+    const { view, target, plan } = setup();
+    view.dom.closest.mockReturnValue({} as Element);
+    expect(targetFor(view as unknown as EditorView, target.block, target.snapshot)).toBeNull();
+    expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('rejected');
+    expect(view.state.doc.toString()).toBe('alpha\n\nbeta');
   });
   it('refuses a structural merge of adjacent list containers', () => {
     const { view } = setup();

@@ -5,7 +5,7 @@ import { decodeSettings, defaults, SixDotsSettingsTab } from './obsidian/setting
 import type { Settings } from './obsidian/settings';
 import { translator } from './i18n';
 import { Controller, editorExtension } from './editor/controller';
-import { editable } from './editor/context';
+import { editable, tableFocused } from './editor/context';
 import { conversionReason } from './domain/convert';
 import { extractionReason } from './domain/extract';
 import { siblingBlocks } from './domain/block';
@@ -40,9 +40,9 @@ export default class SixDots extends Plugin {
       ['extract-block', 'extract', (controller: Controller) => { const target = controller.current(); if (target) this.actions.extract(controller.view, target); }],
     ] as const;
     for (const [id, name, run] of commands) this.addCommand({ id, name: this.t(name), editorCheckCallback: (checking, editor) => {
-      const entry = [...this.controllers].find(([view]) => view.state.field(editorInfoField, false)?.editor === editor && editable(view));
+      const entry = [...this.controllers].find(([view]) => view.state.field(editorInfoField, false)?.editor === editor && editable(view) && !tableFocused(view));
       if (!entry) return false;
-      if (id !== 'open-block-actions' && entry[1].cache.snapshot) {
+      if (entry[1].cache.snapshot) {
         const target = entry[1].peek();
         if (!target) return false;
         if (id === 'convert-to-task' && conversionReason(target.block, 'task')) return false;

@@ -30,6 +30,7 @@ export interface Snapshot {
   readonly text: string;
   readonly blocks: readonly Block[];
   readonly roots: readonly Block[];
+  readonly tableRanges: readonly Span[];
   readonly frontmatterEnd: number;
 }
 export interface Plan { readonly edits: readonly Edit[]; readonly cursor: number; readonly createdId?: string }
@@ -42,7 +43,12 @@ export function actionable(block: Block): boolean {
   return !['protected', 'list'].includes(block.kind) && !block.ambiguousIds;
 }
 
+export function isTablePosition(snapshot: Snapshot, position: number): boolean {
+  return snapshot.tableRanges.some(range => range.from <= position && position <= range.to);
+}
+
 export function atPosition(snapshot: Snapshot, position: number): Block | null {
+  if (isTablePosition(snapshot, position)) return null;
   const block = snapshot.blocks.find(block => block.kind !== 'list' && block.from <= position && position <= block.contentTo);
   // A protected child must not fall through to an actionable ancestor.
   return block && actionable(block) ? block : null;

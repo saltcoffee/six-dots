@@ -33,6 +33,7 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
   const ids: BlockId[] = [];
   const definitions: Span[] = [];
   const headingSpans: Span[] = [];
+  const tableRanges: Span[] = [];
   const nodeIds = new Map<number, BlockId>();
   const idListOwners = new Map<BlockId, number>();
   const rootNodes = children(syntax.topNode);
@@ -72,6 +73,11 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
   syntax.iterate({ enter(node) {
     if (node.name !== 'Document' && excluded(node.from, node.to)) return false;
     if (['FencedCode', 'CodeBlock', 'InlineCode', 'HTMLBlock'].includes(node.name)) return false;
+    // Protect table source positions at every depth without disabling the enclosing block.
+    if (node.name === 'Table') {
+      tableRanges.push({ from: lineStart(text, node.from), to: contentEnd(text, node) });
+      return false;
+    }
     if (/^(ATX|Setext)Heading/.test(node.name)) headingSpans.push({ from: node.from, to: node.to });
     if (node.name === 'LinkReference' || /^\[\^[^\]]+\]:/.test(text.slice(node.from, lineEnd(text, node.from)))) definitions.push({ from: node.from, to: node.to });
     if (!['Paragraph', 'Task'].includes(node.name) && !/^ATXHeading[1-6]$/.test(node.name)) return;
@@ -165,7 +171,7 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
   roots.sort((a, b) => a.from - b.from);
   // Children precede parents for hit testing, without changing their actual source ranges.
   blocks.sort((a, b) => (a.to - a.from) - (b.to - b.from));
-  return { text, blocks, roots, frontmatterEnd: fmEnd };
+  return { text, blocks, roots, tableRanges, frontmatterEnd: fmEnd };
 }
 
 export function excludedInlineRanges(text: string): readonly Span[] {

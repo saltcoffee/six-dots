@@ -43,6 +43,45 @@ describe('list content boundaries', () => {
   });
 });
 
+describe('nested table source boundaries', () => {
+  it.each([
+    { kind: 'quote', text: '> parent\n>\n> | a | b |\n> |---|---|\n> |x|y|\n>\n> after' },
+    { kind: 'callout', text: '> [!note] parent\n>\n> | a | b |\n> |---|---|\n> |x|y|\n>\n> after' },
+    { kind: 'list-item', text: '- parent\n\n  | a | b |\n  |---|---|\n  |x|y|\n\n  after' },
+    { kind: 'list-item', text: '- outer\n  - parent\n\n    | a | b |\n    |---|---|\n    |x|y|\n\n    after' },
+    { kind: 'callout', text: '> [!note] parent 📋\n>\n> > | a | b |\n> > |---|---|\n> > |x|y|\n>\n> after' },
+  ])('rejects every table source position while preserving its $kind parent', ({ kind, text }) => {
+    const snapshot = parseSnapshot(text);
+    const firstLine = text.lastIndexOf('\n', text.indexOf('| a')) + 1;
+    const lastLineEnd = text.indexOf('|x|y|') + '|x|y|'.length;
+    for (let position = firstLine; position <= lastLineEnd; position++) expect(atPosition(snapshot, position), `position ${position}`).toBeNull();
+    const parent = atPosition(snapshot, text.indexOf('parent'))!;
+    expect(parent.kind).toBe(kind);
+    expect(atPosition(snapshot, text.indexOf('after'))).toBe(parent);
+  });
+
+  it.each([
+    '> parent\n>\n> | a | b |\n> |---|---|\n> |x|y|',
+    '> [!note] parent\n>\n> | a | b |\n> |---|---|\n> |x|y|',
+    '- parent\n\n  | a | b |\n  |---|---|\n  |x|y|',
+  ])('still moves a complete parent with its table from outside the table: %s', text => {
+    const list = text.startsWith('-');
+    const snapshot = parseSnapshot(text + (list ? '\n- sibling' : '\n\nsibling'));
+    const parent = atPosition(snapshot, text.indexOf('parent'))!;
+    const next = applyEdits(snapshot.text, moveBy(snapshot, parent, 1)!.edits);
+    expect(next).toBe((list ? '- sibling\n' : 'sibling\n\n') + text);
+    expect(atPosition(parseSnapshot(next), next.indexOf('x'))).toBeNull();
+  });
+
+  it.each([
+    { kind: 'code', text: '```md\n| a | b |\n|---|---|\n|x|y|\n```' },
+    { kind: 'callout', text: '> [!note]\n> ```md\n> | a | b |\n> |---|---|\n> |x|y|\n> ```' },
+    { kind: 'list-item', text: '- parent\n  ```md\n  | a | b |\n  |---|---|\n  |x|y|\n  ```' },
+  ])('keeps table-looking text inside a $kind code fence actionable', ({ kind, text }) => {
+    expect(atPosition(parseSnapshot(text), text.indexOf('x'))?.kind).toBe(kind);
+  });
+});
+
 describe('native ID ownership regressions', () => {
   it('inserts before the complete CRLF boundary and recognizes the result', () => {
     const text = '- parent\r\n  continuation\r\n- sibling';
