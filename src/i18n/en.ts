@@ -9,6 +9,7 @@ export const en = {
   hasAnchors: 'This subtree contains headings. Extracting it could break incoming links.',
   customTask: 'Custom task states are preserved. Conversion is unavailable.', singleLine: 'Headings require a single source line.',
   unsafe: 'The Markdown structure cannot be safely preserved.', noSibling: 'No sibling in that direction.',
+  simpleQuoteOnly: 'Only simple quotes with plain paragraphs can be unwrapped.', quoteUnwrapped: 'Quote converted to plain text.',
   preparing: 'Preparing this block. Please try again.', changed: 'The note changed. Please reopen block actions.',
   selectOne: 'Place a single cursor in an editable Markdown block.', failed: 'The action could not be completed.',
   diverged: 'The editor result differs from the planned edit. Please inspect the note.',

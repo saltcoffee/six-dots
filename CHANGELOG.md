@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5 - Unreleased
+
+- Convert simple quotes to plain text from the block menu, preserving paragraph breaks, supported inline Markdown, and undo history.
+- Protect literal table delimiters when removing quote markers and refuse conversions that cannot preserve Markdown structure or block IDs.
+- Provide English and Chinese conversion feedback. Keep full quote validation off the editor's snapshot preparation path.
+
+Release validation is still in progress. Minimum-host, IME, assistive technology, performance, and affected mobile-device checks remain open.
+
 ## 0.1.4 - 2026-10-30
 
 - Invalidate open block actions and pending drags when a note is switched or renamed, including when its text does not change.

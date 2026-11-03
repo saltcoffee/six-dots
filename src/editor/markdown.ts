@@ -1,6 +1,7 @@
 import { parser, GFM } from '@lezer/markdown';
 import type { SyntaxNode, Tree } from '@lezer/common';
 import type { Block, BlockId, BlockKind, ListMarker, Snapshot, Span } from '../domain/block';
+import { quotePrefixLength } from '../domain/convert';
 
 export const markdownParser = parser.configure(GFM);
 
@@ -15,6 +16,104 @@ function children(node: SyntaxNode): SyntaxNode[] {
   const result: SyntaxNode[] = [];
   for (let child = node.firstChild; child; child = child.nextSibling) result.push(child);
   return result;
+}
+
+function quoteParagraphs(node: SyntaxNode): SyntaxNode[] | undefined {
+  const paragraphs = children(node).filter(child => child.name !== 'QuoteMark');
+  return paragraphs.length && paragraphs.every(child => child.name === 'Paragraph') ? paragraphs : undefined;
+}
+
+function withoutMarkers(source: string, markers: readonly Span[]) {
+  let removed = 0, start = 0;
+  const pieces: string[] = [];
+  const prefixes = markers.map(({ from, to }) => {
+    pieces.push(source.slice(start, from));
+    start = to;
+    removed += to - from;
+    return { end: to, removed };
+  });
+  pieces.push(source.slice(start));
+  const offset = (at: number) => {
+    let low = 0, high = prefixes.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (prefixes[mid]!.end <= at) low = mid + 1;
+      else high = mid;
+    }
+    return at - (prefixes[low - 1]?.removed ?? 0);
+  };
+  return { text: pieces.join(''), offset };
+}
+
+function hasInlineHighlight(text: string): boolean {
+  let previous = text.indexOf('==');
+  while (previous >= 0) {
+    const next = text.indexOf('==', previous + 1);
+    if (next < 0) return false;
+    if (next > previous + 2 && !/\s/.test(text[previous + 2]!) && !/\s/.test(text[next - 1]!)) return true;
+    previous = next;
+  }
+  return false;
+}
+
+function inspectParagraphs(nodes: SyntaxNode[], text: string, signatures?: string[], quoted = false, escapes: ReadonlySet<number> = new Set()): boolean {
+  if (!nodes.length || nodes.some(node => node.name !== 'Paragraph')) return false;
+  for (const paragraph of nodes) {
+    const tokens: { name: string; from: number; to: number }[] = [], markers: Span[] = [];
+    const outsideCode: string[] = [];
+    let scanFrom = paragraph.from, safe = true;
+    paragraph.cursor().iterate(node => {
+      if (node.name === 'QuoteMark') return false;
+      if (['InlineHTML', 'HTMLTag', 'Comment', 'ProcessingInstruction'].includes(node.name)) safe = false;
+      if (node.name === 'Escape' && escapes.has(node.from) && text.slice(node.from, node.to) === '\\|') {
+        markers.push({ from: node.from - paragraph.from, to: node.from - paragraph.from + 1 });
+        return false;
+      }
+      if (signatures && node.name !== 'Paragraph') tokens.push({ name: node.name, from: node.from - paragraph.from, to: node.to - paragraph.from });
+      if (node.name === 'InlineCode') {
+        outsideCode.push(text.slice(scanFrom, node.from), 'x');
+        scanFrom = node.to;
+        return false;
+      }
+    });
+    outsideCode.push(text.slice(scanFrom, paragraph.to));
+    // These are conservative exclusions, not a parser for Obsidian extensions.
+    const visible = outsideCode.join('');
+    if (!safe || /%%|\[\[|\[\^|\\\(|\$\$|\$(?!\s)[^$]+(?<!\s)\$/.test(visible) || hasInlineHighlight(visible)) return false;
+    if (signatures) {
+      const source = text.slice(paragraph.from, paragraph.to);
+      if (quoted) {
+        let start = 0;
+        for (const line of source.split('\n')) {
+          const length = start ? quotePrefixLength(line) : 0;
+          if (length) markers.push({ from: start, to: start + length });
+          start += line.length + 1;
+        }
+      }
+      const normalized = withoutMarkers(source, markers);
+      signatures.push(JSON.stringify([normalized.text, tokens.map(token => [token.name, normalized.offset(token.from), normalized.offset(token.to)])]));
+    }
+  }
+  return true;
+}
+
+function quoteBodyNodes(text: string): SyntaxNode[] {
+  const root = markdownParser.parse(text).topNode.firstChild;
+  return root?.name === 'Blockquote' && !root.nextSibling ? quoteParagraphs(root) ?? [] : [];
+}
+
+export function safePlainQuote(text: string): boolean {
+  return inspectParagraphs(quoteBodyNodes(text), text);
+}
+
+export function quoteSignatures(text: string): readonly string[] | undefined {
+  const signatures: string[] = [];
+  return inspectParagraphs(quoteBodyNodes(text), text, signatures, true) ? signatures : undefined;
+}
+
+export function plainParagraphs(text: string, escapes?: readonly number[]): readonly string[] | undefined {
+  const signatures: string[] = [];
+  return inspectParagraphs(children(markdownParser.parse(text).topNode), text, signatures, false, new Set(escapes)) ? signatures : undefined;
 }
 
 export function frontmatterEnd(text: string): number {
@@ -100,6 +199,7 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
 
   function make(node: SyntaxNode, group: string, kind: BlockKind, marker: ListMarker | null = null): Block {
     const from = lineStart(text, node.from), to = contentEnd(text, node);
+    const source = text.slice(from, to);
     const nestedIds = ids.filter(id => from <= id.from && id.to <= to);
     let ownId = kind === 'paragraph' ? nodeIds.get(node.from) ?? null : null;
     if (kind === 'list-item' && marker?.textRange) ownId = nodeIds.get(marker.textRange.from) ?? null;
@@ -111,11 +211,12 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
     const unclearListId = kind === 'list-item' && nestedIds.some(id => idListOwners.get(id) === node.from && id !== ownId);
     const unclearQuoteId = (kind === 'quote' || kind === 'callout') && nestedIds.length > 0 && !ownId;
     const block: Block = {
-      from, to, contentTo: to, kind, group, marker, text: text.slice(from, to), ownId,
+      from, to, contentTo: to, kind, group, marker, text: source, ownId,
       hasIds: nestedIds.length > 0,
       ambiguousIds: unclearListId || unclearQuoteId || nestedIds.some(id => duplicates.has(id.value)),
       hasHeadings: headingSpans.some(heading => from <= heading.from && heading.to <= to),
       hasChildren: children(node).some(child => ['BulletList', 'OrderedList', 'Blockquote', 'FencedCode', 'CodeBlock'].includes(child.name)) || children(node).filter(child => ['Paragraph', 'Task'].includes(child.name)).length > 1,
+      ...(kind === 'quote' && quoteParagraphs(node) ? { flatQuote: true as const } : {}),
     };
     blocks.push(block);
     return block;
@@ -171,7 +272,7 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
   roots.sort((a, b) => a.from - b.from);
   // Children precede parents for hit testing, without changing their actual source ranges.
   blocks.sort((a, b) => (a.to - a.from) - (b.to - b.from));
-  return { text, blocks, roots, tableRanges, frontmatterEnd: fmEnd };
+  return { text, blocks, roots, ids, tableRanges, frontmatterEnd: fmEnd };
 }
 
 export function excludedInlineRanges(text: string): readonly Span[] {

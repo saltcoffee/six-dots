@@ -8,6 +8,7 @@ import { Actions } from '../src/obsidian/actions';
 import { targetFor } from '../src/editor/context';
 import { parseSnapshot } from '../src/editor/markdown';
 import { defaults } from '../src/obsidian/settings';
+import { translator } from '../src/i18n';
 
 type Submit = (name: string, folder: string, active: () => boolean) => Promise<{ message: string; retryable: boolean } | null>;
 const ui = vi.hoisted(() => ({ submits: [] as Submit[], notices: [] as string[] }));
@@ -35,14 +36,14 @@ vi.mock('../src/ui/dialogs', () => ({
   },
 }));
 
-function setup() {
+function setup(doc = 'alpha\n\nbeta', language?: string) {
   ui.submits = []; ui.notices = [];
   const root = new TFolder(), source = Object.assign(new TFile(), { path: 'Source.md' });
   root.children.push(source);
   const files = new Map([['Source.md', source]]);
   const content = new Map<string, string>();
   const view = {
-    state: EditorState.create({ doc: 'alpha\n\nbeta', extensions: [editorInfoField, history()] }),
+    state: EditorState.create({ doc, extensions: [editorInfoField, history()] }),
     dom: { isConnected: true, nodeType: 1, closest: () => null, ownerDocument: {
       createDocumentFragment() {
         return { text: '', createEl(_tag: string, options: { text: string }) {
@@ -70,10 +71,30 @@ function setup() {
     fileManager: { generateMarkdownLink: (file: TFile) => `[[${file.path.replace(/\.md$/, '')}]]` },
     metadataCache: { getFirstLinkpathDest: (path: string) => files.get(path) ?? files.get(path + '.md') ?? null },
   } as unknown as App;
-  const actions = new Actions(app, key => key, () => defaults);
+  const actions = new Actions(app, language ? translator(language) : key => key, () => defaults);
   const open = () => { actions.extract(view as unknown as EditorView, target); return ui.submits.at(-1)!; };
   return { actions, open, view, target, vault, files, content, root };
 }
+
+describe('localized quote conversion feedback', () => {
+  it.each([
+    ['en', 'Quote converted to plain text.', 'Only simple quotes with plain paragraphs can be unwrapped.'],
+    ['zh-CN', '已将引用转为普通文本。', '仅由普通段落组成的简单引用可以转为普通文本。'],
+  ])('reports both success and rejection in %s', (language, success, rejection) => {
+    const announce = vi.fn();
+    const accepted = setup('> 正文 **text**', language);
+    accepted.actions.convert(accepted.view as unknown as EditorView, accepted.target, 'paragraph', announce);
+    expect(accepted.view.state.doc.toString()).toBe('正文 **text**');
+    expect(ui.notices).toEqual([success]);
+    expect(announce).toHaveBeenLastCalledWith(success);
+
+    const refused = setup('> - nested', language);
+    refused.actions.convert(refused.view as unknown as EditorView, refused.target, 'paragraph', announce);
+    expect(refused.view.state.doc.toString()).toBe('> - nested');
+    expect(ui.notices).toEqual([rejection]);
+    expect(announce).toHaveBeenLastCalledWith(rejection);
+  });
+});
 
 describe('host extraction safety', () => {
   it('reports invalid names as input errors without creating a file', async () => {

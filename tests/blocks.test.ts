@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSnapshot } from '../src/editor/markdown';
+import { parseSnapshot, quoteSignatures, safePlainQuote } from '../src/editor/markdown';
 import { actionable, applyEdits, atPosition } from '../src/domain/block';
 import { move, moveBy } from '../src/domain/move';
 import { convert, conversionReason } from '../src/domain/convert';
@@ -77,6 +77,37 @@ describe('moves', () => {
   });
 });
 describe('conversions', () => {
+  it('round-trips a simple paragraph through a quote without touching Markdown or hard breaks', () => {
+    const text = '中文 😀 **bold**\\\n[link](Note.md) and `code`';
+    expect(formatted(formatted(text, 'quote'), 'paragraph', 'quote')).toBe(text);
+  });
+  it.each(['Total: $5.', 'Compare a == b.', 'Example: `[[Note]] $x$ ==marked==`'])('keeps literal syntax in a simple quote: %s', text => {
+    expect(safePlainQuote(`> ${text}`)).toBe(true);
+    expect(formatted(`> ${text}`, 'paragraph', 'quote')).toBe(text);
+  });
+  it('treats a long uninterrupted run of equals signs as literal text', () => {
+    expect(safePlainQuote('> literal ' + '='.repeat(100000))).toBe(true);
+  });
+  it('does not duplicate quoted text for every nested inline node', () => {
+    const markers = '*'.repeat(128), text = `> ${markers}${'x'.repeat(150000)}${markers}`;
+    expect(block(text, 'quote')).toMatchObject({ flatQuote: true });
+    expect(block(text, 'quote')).not.toHaveProperty('plainQuote');
+    const signatures = quoteSignatures(text)!;
+    expect(signatures.join('').length).toBeLessThan(text.length * 2);
+  });
+  it.each([
+    '>', '> one\nlazy continuation', '> > nested', '> - item', '> # heading', '> ---',
+    '> \tcode', '> ```\n> code\n> ```', '> text <b>HTML</b>', '> %%hidden%%', '> [[Unverified syntax]]',
+    '> math $x$ here', '> ==highlight==',
+  ])('does not unwrap an empty, nested or ambiguous quote: %s', text => {
+    const source = parseSnapshot(text).roots[0]!;
+    const reason = conversionReason(source, 'paragraph');
+    if (reason) expect(() => convert(source, 'paragraph')).toThrow();
+    else expect(safePlainQuote(source.text)).toBe(false);
+  });
+  it('keeps quotes with block IDs ineligible', () => {
+    expect(conversionReason(block('> one ^ref', 'quote'), 'paragraph')).toBe('hasIds');
+  });
   it.each(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)('creates %s and is idempotent', format => {
     const text = formatted('Hello **world** [[Link]]', format);
     expect(text).toBe('#'.repeat(Number(format.slice(1))) + ' Hello **world** [[Link]]');
