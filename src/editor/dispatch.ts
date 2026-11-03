@@ -2,11 +2,37 @@ import { ChangeSet, EditorSelection } from '@codemirror/state';
 import { isolateHistory } from '@codemirror/commands';
 import type { EditorView } from '@codemirror/view';
 import { BlockError } from '../domain/block';
-import type { Format, Plan } from '../domain/block';
+import type { Format, Plan, Snapshot } from '../domain/block';
+import { conversionReason } from '../domain/convert';
 import type { CommitResult } from '../application/extraction';
-import { parseSnapshot } from './markdown';
+import { parseSnapshot, plainParagraphs, quoteSignatures } from './markdown';
 import { targetValid } from './context';
 import type { Target } from './context';
+
+function validateUnquote(target: Target, plan: Plan, changes: ChangeSet, candidate: Snapshot): void {
+  const { block, snapshot } = target;
+  const [edit] = plan.edits;
+  const index = snapshot.roots.indexOf(block);
+  if (index < 0 || plan.edits.length !== 1 || edit?.from !== block.from || edit.to !== block.to) throw new BlockError('unsafe');
+  const reason = conversionReason(block, 'paragraph');
+  if (reason) throw new BlockError(reason);
+  const signatures = quoteSignatures(block.text);
+  if (!signatures) throw new BlockError('simpleQuoteOnly');
+  const paragraphs = plainParagraphs(edit.insert, plan.quoteEscapes);
+  if (!paragraphs || paragraphs.length !== signatures.length || paragraphs.some((signature, i) => signature !== signatures[i])) throw new BlockError('unsafe');
+  if (candidate.roots.length !== snapshot.roots.length - 1 + paragraphs.length) throw new BlockError('unsafe');
+  if (candidate.roots.slice(index, index + paragraphs.length).some(root => root.kind !== 'paragraph' || root.from < edit.from || root.to > edit.from + edit.insert.length)) throw new BlockError('unsafe');
+  for (const [i, original] of snapshot.roots.entries()) {
+    if (i === index) continue;
+    const root = candidate.roots[i < index ? i : i + paragraphs.length - 1];
+    if (root?.kind !== original.kind || root.from !== changes.mapPos(original.from, 1) || root.to !== changes.mapPos(original.to, -1)
+      || root.ownId?.value !== original.ownId?.value || root.ambiguousIds !== original.ambiguousIds) throw new BlockError('unsafe');
+  }
+  if (candidate.ids.length !== snapshot.ids.length || snapshot.ids.some((id, i) => {
+    const next = candidate.ids[i];
+    return next?.value !== id.value || next.from !== changes.mapPos(id.from, 1) || next.to !== changes.mapPos(id.to, -1);
+  })) throw new BlockError('unsafe');
+}
 
 export function dispatchPlan(view: EditorView, target: Target, plan: Plan, format?: Format): CommitResult {
   if (!targetValid(view, target)) return 'rejected';
@@ -18,7 +44,9 @@ export function dispatchPlan(view: EditorView, target: Target, plan: Plan, forma
     const candidate = parseSnapshot(text);
     if (text.slice(0, candidate.frontmatterEnd) !== target.snapshot.text.slice(0, target.snapshot.frontmatterEnd)) throw new BlockError('unsafe');
     const cursor = Math.min(plan.cursor, expected.length);
-    if (format) {
+    if (format === 'paragraph' && target.block.kind === 'quote') {
+      validateUnquote(target, plan, changes, candidate);
+    } else if (format) {
       const kind = format.startsWith('h') ? 'heading' : format.startsWith('callout:') ? 'callout' : format === 'bullet' || format === 'task' ? 'list-item' : format;
       // A single-item list and its item can have identical spans. Validate the expected family.
       const result = candidate.blocks.find(block => block.kind === kind && block.from <= cursor && cursor <= block.contentTo);

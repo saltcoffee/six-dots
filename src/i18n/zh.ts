@@ -11,6 +11,7 @@ export const zh: Record<keyof typeof en, string> = {
   hasAnchors: '子树中含有标题，提取可能破坏已有入链。',
   customTask: '自定义任务状态会原样保留，暂不支持转换。', singleLine: '转为标题仅支持单源文本行。',
   unsafe: '无法安全保留当前 Markdown 结构。', noSibling: '该方向没有可移动的同级块。',
+  simpleQuoteOnly: '仅由普通段落组成的简单引用可以转为普通文本。', quoteUnwrapped: '已将引用转为普通文本。',
   preparing: '正在准备当前块，请稍后重试。', changed: '笔记内容已变化，请重新打开块操作。',
   selectOne: '请将单个光标放在可编辑的 Markdown 块中。', failed: '操作未能完成。',
   diverged: '编辑器结果与预期不一致，请核对笔记。',

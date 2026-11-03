@@ -3,6 +3,9 @@ import type { Block, Format, Plan, Reason, Snapshot } from './block';
 
 export function conversionReason(block: Block, format: Format): Reason | null {
   if (block.hasIds || block.ambiguousIds) return 'hasIds';
+  if (block.kind === 'quote' && format === 'paragraph') {
+    return block.flatQuote && !block.text.includes('\r') && block.text.split('\n').every(quotePrefixLength) ? null : 'simpleQuoteOnly';
+  }
   if (block.kind === 'list-item') {
     if (block.marker?.number !== null) return 'unsupported';
     if (!block.marker?.textRange) return 'unsupported';
@@ -18,6 +21,7 @@ export function convert(block: Block, format: Format, snapshot?: Snapshot, caret
   const reason = conversionReason(block, format);
   if (reason) throw new BlockError(reason);
   let replacement: string;
+  const quoteEscapes: number[] = [];
   if (block.kind === 'list-item' && block.marker) {
     const { indent, marker, spacing, task } = block.marker;
     if (format === 'task' && task !== null || format === 'bullet' && task === null) return null;
@@ -26,6 +30,19 @@ export function convert(block: Block, format: Format, snapshot?: Snapshot, caret
     replacement = prefix + (format === 'task' ? '[ ] ' + body : body.replace(/^\[[ xX]\][ \t]*/, ''));
   } else if (block.kind === 'callout') {
     replacement = block.text.replace(/^(\s*>\s*\[!)[^\]]+(\])/, `$1${format.slice(8)}$2`);
+  } else if (block.kind === 'quote' && format === 'paragraph') {
+    const lines = block.text.split('\n').map(line => line.slice(quotePrefixLength(line)));
+    let offset = 0;
+    replacement = lines.map((line, i) => {
+      // A literal delimiter row can become a GFM table once the quote prefixes disappear.
+      if (i > 0 && lines[i - 1]!.includes('|') && /^ {0,3}\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*$/.test(line)) {
+        const pipe = line.indexOf('|');
+        quoteEscapes.push(offset + pipe);
+        line = line.slice(0, pipe) + '\\' + line.slice(pipe);
+      }
+      offset += line.length + 1;
+      return line;
+    }).join('\n');
   } else if (block.kind === 'quote') {
     replacement = `> [!${format.slice(8)}]\n${block.text}`;
   } else {
@@ -48,7 +65,8 @@ export function convert(block: Block, format: Format, snapshot?: Snapshot, caret
   }
   const cursor = caret !== undefined && block.from <= caret && caret <= block.contentTo
     ? mappedCaret(block, format, replacement, caret - block.from) : replacement.length;
-  return { edits: [{ from: block.from, to: block.to, insert: before + replacement + after }], cursor: block.from + before.length + cursor };
+  return { edits: [{ from: block.from, to: block.to, insert: before + replacement + after }], cursor: block.from + before.length + cursor,
+    ...(quoteEscapes.length ? { quoteEscapes: quoteEscapes.map(offset => offset + before.length) } : {}) };
 }
 
 function mappedCaret(block: Block, format: Format, next: string, position: number): number {
@@ -59,7 +77,13 @@ function mappedCaret(block: Block, format: Format, next: string, position: numbe
   const nextRow = Math.min(row + shift, nextLines.length - 1);
   const oldLine = oldLines[row] ?? '', nextLine = nextLines[nextRow] ?? '';
   let mapped = column;
-  if (block.kind === 'callout') {
+  if (block.kind === 'quote' && format === 'paragraph') {
+    const prefix = quotePrefixLength(oldLine);
+    mapped -= prefix;
+    const escape = nextLine.indexOf('\\|');
+    if (nextLine.length === oldLine.length - prefix + 1 && escape >= 0 && mapped >= escape) mapped++;
+    if (/[\uDC00-\uDFFF]/.test(nextLine[mapped] ?? '') && /[\uD800-\uDBFF]/.test(nextLine[mapped - 1] ?? '')) mapped--;
+  } else if (block.kind === 'callout') {
     let suffix = 0;
     while (suffix < oldLine.length && suffix < nextLine.length && oldLine.at(-suffix - 1) === nextLine.at(-suffix - 1)) suffix++;
     if (column >= oldLine.length - suffix) mapped += nextLine.length - oldLine.length;
@@ -75,6 +99,10 @@ function mappedCaret(block: Block, format: Format, next: string, position: numbe
   }
   const start = nextLines.slice(0, nextRow).reduce((length, line) => length + line.length + 1, 0);
   return start + Math.min(nextLine.length, Math.max(0, mapped));
+}
+
+export function quotePrefixLength(line: string): number {
+  return /^ {0,3}>(?! *\t) ?/.exec(line)?.[0].length ?? 0;
 }
 
 function escapeBlockStart(text: string): string {

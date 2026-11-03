@@ -69,6 +69,64 @@ describe('real CM transactions with a minimal host boundary', () => {
     expect(view.state.doc.toString()).toBe(before);
   });
 
+  it.each(['\n', '\r\n'])('unwraps multiple quote paragraphs with %j input and one undo/redo', eol => {
+    const { view } = setup();
+    const original = ['Before ^before', '', '> 一段 😀 **bold**  ', '> Total: $5. Compare a == b.', '>', '> [link](Note.md) and `[[Note]]`', '> **more', '> bold**', '', 'After ^after'].join(eol);
+    const expected = ['Before ^before', '', '一段 😀 **bold**  ', 'Total: $5. Compare a == b.', '', '[link](Note.md) and `[[Note]]`', '**more', 'bold**', '', 'After ^after'].join('\n');
+    view.state = EditorState.create({ doc: original, selection: { anchor: 23 }, extensions: [editorInfoField, history()] });
+    const before = view.state.doc.toString(), caret = view.state.selection.main.head;
+    const snapshot = parseSnapshot(before), block = snapshot.roots.find(item => item.kind === 'quote')!;
+    const target = targetFor(view as unknown as EditorView, block, snapshot)!;
+    expect(dispatchPlan(view as unknown as EditorView, target, convert(block, 'paragraph', snapshot, caret)!, 'paragraph')).toBe('applied');
+    expect(view.state.doc.toString()).toBe(expected);
+    expect(view.state.selection.main.head).toBe(caret - 2);
+    expect(undo({ state: view.state, dispatch: transaction => view.dispatch(transaction) })).toBe(true);
+    expect(view.state.doc.toString()).toBe(before);
+    expect(view.state.selection.main.head).toBe(caret);
+    expect(undo({ state: view.state, dispatch: transaction => view.dispatch(transaction) })).toBe(false);
+    expect(redo({ state: view.state, dispatch: transaction => view.dispatch(transaction) })).toBe(true);
+    expect(view.state.doc.toString()).toBe(expected);
+  });
+
+  it('rejects a quote conversion that turns literal text into a new block ID', () => {
+    const { view } = setup();
+    const text = '> A literal marker ^ref\n> continues here.';
+    view.state = EditorState.create({ doc: text, extensions: [editorInfoField, history()] });
+    const snapshot = parseSnapshot(text), block = snapshot.roots[0]!;
+    const target = targetFor(view as unknown as EditorView, block, snapshot)!;
+    const edit = { from: block.from, to: block.to, insert: 'A literal marker continues here. ^ref' };
+    expect(() => dispatchPlan(view as unknown as EditorView, target, { edits: [edit], cursor: 1 }, 'paragraph')).toThrow();
+    expect(view.state.doc.toString()).toBe(text);
+    expect(undo({ state: view.state, dispatch: transaction => view.dispatch(transaction) })).toBe(false);
+  });
+
+  it('escapes a literal line-start pipe before it can turn quoted text into a table', () => {
+    const { view } = setup();
+    const text = '> intro\n>| a |\n   > | - |';
+    const caret = text.lastIndexOf('-');
+    view.state = EditorState.create({ doc: text, selection: { anchor: caret }, extensions: [editorInfoField, history()] });
+    const snapshot = parseSnapshot(text), block = snapshot.roots[0]!;
+    const target = targetFor(view as unknown as EditorView, block, snapshot)!;
+    expect(parseSnapshot('intro\n| a |\n| - |').roots.map(root => root.kind)).toEqual(['paragraph', 'protected']);
+    expect(dispatchPlan(view as unknown as EditorView, target, convert(block, 'paragraph', snapshot, caret)!, 'paragraph')).toBe('applied');
+    expect(view.state.doc.toString()).toBe('intro\n| a |\n\\| - |');
+    expect(view.state.doc.toString()[view.state.selection.main.head]).toBe('-');
+    expect(undo({ state: view.state, dispatch: transaction => view.dispatch(transaction) })).toBe(true);
+    expect(view.state.doc.toString()).toBe(text);
+  });
+
+  it('does not merge a converted quote into neighboring paragraphs without a boundary', () => {
+    const { view } = setup();
+    const text = 'Before\n> body';
+    view.state = EditorState.create({ doc: text, extensions: [editorInfoField, history()] });
+    const snapshot = parseSnapshot(text), block = snapshot.roots[1]!;
+    const target = targetFor(view as unknown as EditorView, block, snapshot)!;
+    expect(() => dispatchPlan(view as unknown as EditorView, target, convert(block, 'paragraph')!, 'paragraph')).toThrow();
+    expect(view.state.doc.toString()).toBe(text);
+    expect(dispatchPlan(view as unknown as EditorView, target, convert(block, 'paragraph', snapshot)!, 'paragraph')).toBe('applied');
+    expect(view.state.doc.toString()).toBe('Before\n\nbody');
+  });
+
   it('creates an isolated, undoable move and restores selection', () => {
     const { view, target, plan } = setup();
     expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('applied');

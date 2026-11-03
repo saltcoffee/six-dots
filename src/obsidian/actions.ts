@@ -10,6 +10,7 @@ import { BlockError } from '../domain/block';
 import type { Format, Plan, Snapshot, Block } from '../domain/block';
 import { runExtraction } from '../application/extraction';
 import { dispatchPlan } from '../editor/dispatch';
+import { safePlainQuote } from '../editor/markdown';
 import { targetValid } from '../editor/context';
 import type { Target } from '../editor/context';
 import { pointsToFile, rewriteLinks } from './links';
@@ -27,24 +28,33 @@ export class Actions {
   constructor(readonly app: App, readonly t: Translate, readonly settings: () => Settings) {}
 
   notify(message: string): void { if (this.alive) new Notice(message); }
-  error(error: unknown): void { this.notify(this.t(error instanceof BlockError ? error.reason : 'failed')); }
+  error(error: unknown, report = (message: string) => this.notify(message)): void { report(this.t(error instanceof BlockError ? error.reason : 'failed')); }
   valid(view: EditorView, target: Target): boolean { return this.alive && targetValid(view, target) && this.app.vault.getAbstractFileByPath(target.path) === target.file; }
-  apply(view: EditorView, target: Target, plan: Plan | null, format?: Format): boolean {
-    if (!this.valid(view, target)) { this.notify(this.t('changed')); return false; }
+  apply(view: EditorView, target: Target, plan: Plan | null, format?: Format, report = (message: string) => this.notify(message)): boolean {
+    if (!this.valid(view, target)) { report(this.t('changed')); return false; }
     if (!plan) return true;
     try {
       const result = this.commit(view, target, plan, format);
-      if (result !== 'applied') this.notify(this.t(result === 'diverged' ? 'diverged' : 'changed'));
+      if (result !== 'applied') report(this.t(result === 'diverged' ? 'diverged' : 'changed'));
       return result === 'applied';
-    } catch (error) { this.error(error); return false; }
+    } catch (error) { this.error(error, report); return false; }
   }
   private commit(view: EditorView, target: Target, plan: Plan, format?: Format) {
     this.committing.add(view);
     try { return dispatchPlan(view, target, plan, format); }
     finally { this.committing.delete(view); }
   }
-  convert(view: EditorView, target: Target, format: Format): void {
-    try { this.apply(view, target, convert(target.block, format, target.snapshot, view.state.selection.main.head), format); } catch (error) { this.error(error); }
+  convert(view: EditorView, target: Target, format: Format, announce?: (message: string) => void): void {
+    const unquote = target.block.kind === 'quote' && format === 'paragraph';
+    const report = (message: string) => {
+      if (!this.alive) return;
+      this.notify(message);
+      if (unquote) announce?.(message);
+    };
+    try {
+      const plan = convert(target.block, format, target.snapshot, view.state.selection.main.head);
+      if (this.apply(view, target, plan, format, report) && plan && unquote) report(this.t('quoteUnwrapped'));
+    } catch (error) { this.error(error, report); }
   }
   folded(view: EditorView, block: Block): boolean {
     if (block.kind !== 'heading') return false;
@@ -56,7 +66,7 @@ export class Actions {
     if (this.folded(view, target.block)) { this.notify(this.t('foldHeading')); return; }
     try { this.apply(view, target, moveBy(target.snapshot, target.block, direction)); } catch (error) { this.error(error); }
   }
-  showMenu(view: EditorView, target: Target, point: { x: number; y: number }, onHide: () => void): Menu {
+  showMenu(view: EditorView, target: Target, point: { x: number; y: number }, onHide: () => void, announce?: (message: string) => void): Menu {
     // Keep Escape and focus handling in the originating document, including popout windows.
     let escape = false;
     const onKey: EventListener = event => {
@@ -87,11 +97,12 @@ export class Actions {
       ...(['note', 'info', 'tip', 'warning'] as const).map(type => [`callout:${type}` as Format, `${t('callout')}: ${t(type)}`] as [Format, string]),
     ];
     for (const [format, label] of formats) {
-      const reason = conversionReason(block, format);
+      const reason = conversionReason(block, format)
+        ?? (block.kind === 'quote' && format === 'paragraph' && !safePlainQuote(block.text) ? 'simpleQuoteOnly' : null);
       // Unsupported families are omitted; restrictions within a supported family remain explained.
       if (reason === 'unsupported') continue;
       menu.addItem(item => item.setTitle(reason ? `${label} — ${t(reason)}` : label).setDisabled(!!reason).setChecked(current === format)
-        .onClick(() => this.convert(view, target, format)));
+        .onClick(() => this.convert(view, target, format, announce)));
     }
     menu.addSeparator();
     const linkReason = blockLinkReason(block);

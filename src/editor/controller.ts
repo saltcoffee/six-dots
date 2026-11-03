@@ -207,10 +207,11 @@ export class Controller {
     const rect = this.button.hidden ? cursor ?? this.view.dom.getBoundingClientRect() : this.button.getBoundingClientRect();
     this.menu?.hide();
     this.button.setAttribute('aria-expanded', 'true');
+    this.status.textContent = '';
     if (Platform.isMobile) this.view.contentDOM.blur();
     this.menu = this.actions.showMenu(this.view, target, { x: rect.left, y: rect.bottom }, () => {
       this.menu = null; this.button.setAttribute('aria-expanded', 'false'); this.measure(); this.hideLater();
-    });
+    }, message => { this.status.textContent = message; });
   }
   private down(event: PointerEvent): void {
     if (this.disposed || this.syncContext()) return;
