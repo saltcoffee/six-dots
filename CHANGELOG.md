@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.5 - Unreleased
+## 0.1.6 - 2026-11-10
+
+- Exchange adjacent sections at the same heading level within one parent, including their body and subheadings. Preview both ranges and the new order before confirming.
+- Preserve section and internal folds by content, including undo/redo and same-file editor synchronization. Refuse ambiguous headings, block IDs, boundaries, and hidden cursors.
+- Prepare move candidates cooperatively with visible cancellation and reuse the verified snapshot after a checked, isolated transaction. Existing block commands and heading-line moves keep their scope.
+- Fix inline-comment heading detection, preserve peer selected content and fold synchronization through unrelated state updates, and slice indexed section validation so it remains cancelable.
+
+## 0.1.5 - 2026-11-03
 
 - Convert simple quotes to plain text from the block menu, preserving paragraph breaks, supported inline Markdown, and undo history.
 - Protect literal table delimiters when removing quote markers and refuse conversions that cannot preserve Markdown structure or block IDs.

@@ -10,6 +10,7 @@ SixDots brings Notion-style block actions to Obsidian. Drag a paragraph into pla
 
 - **Drag blocks to reorder them.** Move paragraphs, individual headings, quotes, callouts, and fenced code blocks within a note.
 - **Keep lists together.** Reorder sibling items without leaving their nested content behind. Ordered lists keep their starting number.
+- **Exchange entire sections.** Move a heading with its body and subheadings past an adjacent section at the same level and within the same parent, after checking a preview.
 - **Change formatting in place.** Turn supported text into headings, bullet points, tasks, quotes, or callouts.
 - **Copy a block link.** Reuse a native block ID or explicitly create one for the selected block.
 - **Extract to a new note.** Move an eligible paragraph or list-item subtree into a new note and leave a link behind.
@@ -27,6 +28,8 @@ Switching or renaming a note invalidates its open actions and pending drag. Star
 
 For keyboard access, open the command palette and search for **SixDots: Open block actions**. Other commands move blocks up or down, convert to a task or callout, copy a block link, and extract to a new note. No shortcuts are assigned by default.
 
+For a section, open its heading menu and choose **Move section up/down**, or use the matching command. Review both titles, line ranges, line counts, subheadings, folded-content warning, and the resulting order, then confirm. Source and target may stay folded. Cancel or Esc leaves the note untouched. Moving the editor cursor, editing, folding, switching views, renaming the note, or leaving the app expires an open preview; start again. Legacy block moves prepare automatically with a visible Cancel control and Esc support.
+
 ## Installation
 
 SixDots is **not yet listed in the Obsidian community directory**. Install it manually from GitHub Releases.
@@ -37,11 +40,11 @@ To install a published release manually:
 2. Put those files in `<your vault>/.obsidian/plugins/six-dots/`.
 3. Restart Obsidian and enable **SixDots** under **Settings → Community plugins**.
 
-Obsidian **1.8.7 or later** is required. SixDots supports desktop, phones, and tablets in editing views. The plugin is compiled against the 1.8.7 API; key actions, undo, and unloading have been tested on macOS with Obsidian 1.8.7 and 1.14.5. Mobile support is an early preview: automated touch-event tests and Obsidian mobile emulation have been checked; iOS and Android physical-device verification is pending. Desktop has been manually tested on macOS; Windows and Linux verification is pending. Reading view is outside the current scope.
+Obsidian **1.8.7 or later** is declared as the minimum, and the plugin compiles against that SDK. Version 0.1.6 development validation uses the installed macOS Obsidian **1.15.0**; 1.8.7 has not been retested for this version. Mobile support is an early preview: automated touch tests and desktop mobile emulation do not replace iOS/Android physical-device checks, which remain pending. Windows and Linux verification is also pending. Reading view is outside the current scope.
 
 On mobile, scroll and select text in the note normally. Start a drag from the handle after holding it; moving too early cancels the gesture. You can also choose **Move block up/down** from its menu without dragging. Mobile always uses the cursor handle, including when settings are synced from a desktop. If automatic clipboard access fails, a dialog keeps the block link available to select and copy manually.
 
-Version 0.1.4 verification limits: the latest desktop UI regression did not confirm focus restoration after closing the menu with Esc; the final adjustment still needs a passing real-host result. Native IME and complete performance profiling also remain unverified.
+Version 0.1.6 remains unreleased. Native IME, assistive technology, real-user section-task comparisons, and complete performance acceptance remain pending.
 
 ## Settings
 
@@ -57,7 +60,9 @@ The interface uses Chinese when Obsidian is set to a Chinese locale. Every other
 ## Things to know
 
 - List dragging stays within the same sibling group. It does not change nesting or move content between notes.
-- Heading moves affect the heading line only. Expand a folded heading before moving it.
+- **Move block up/down** and heading dragging affect the heading line only; expand a folded heading first. **Move section up/down** is the separate whole-section action.
+- Section moves require nonempty plain ATX headings (`#` through `######`) throughout the note, with unambiguous native heading anchors and block IDs. Complex/empty headings, heading IDs, and top-level Setext headings disable section moves. Code, math, and comments do not create section boundaries.
+- Section bodies can include protected tables, math, comments, code, lists, links, and unique block IDs; they move intact. Only same-parent, same-level adjacent sections can exchange places. A cursor hidden strictly inside any fold in a same-file editor must be moved to visible text first. If another view's selection would split into disconnected pieces, collapse that selection before moving. Later independent folding follows the content through undo/redo; a fold covering the restored cursor may expand with feedback.
 - Formatting options depend on the block. Headings require a single source line; list items starting with text can switch between ordinary bullets and standard tasks. Items starting with code, quotes, or headings do not offer formatting or new block IDs.
 - Compact nested lists sharing one source line, such as `- - child`, are protected from local block actions.
 - Tables, math, frontmatter, comments, and unsupported structures are protected. Their contents cannot be partially dragged out.

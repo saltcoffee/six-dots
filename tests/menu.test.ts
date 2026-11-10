@@ -20,7 +20,7 @@ vi.mock('obsidian', () => ({
   },
   PluginSettingTab: class {}, Setting: class {},
 }));
-vi.mock('../src/ui/dialogs', () => ({}));
+vi.mock('../src/ui/dialogs', () => ({ ManagedModal: class {} }));
 vi.mock('../src/editor/context', () => ({}));
 
 function setup() {

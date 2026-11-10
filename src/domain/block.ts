@@ -1,3 +1,5 @@
+import type { Heading } from './section';
+
 export type BlockKind = 'paragraph' | 'heading' | 'list-item' | 'quote' | 'callout' | 'code' | 'list' | 'protected';
 export type CalloutType = 'note' | 'info' | 'tip' | 'warning';
 export type Format = 'paragraph' | `h${1 | 2 | 3 | 4 | 5 | 6}` | 'bullet' | 'task' | 'quote' | `callout:${CalloutType}`;
@@ -34,9 +36,11 @@ export interface Snapshot {
   readonly ids: readonly BlockId[];
   readonly tableRanges: readonly Span[];
   readonly frontmatterEnd: number;
+  readonly headings: readonly Heading[];
 }
 export interface Plan { readonly edits: readonly Edit[]; readonly cursor: number; readonly createdId?: string; readonly quoteEscapes?: readonly number[] }
-export type Reason = 'unsupported' | 'hasIds' | 'hasAnchors' | 'customTask' | 'singleLine' | 'simpleQuoteOnly' | 'unsafe' | 'noSibling';
+export type Reason = 'unsupported' | 'hasIds' | 'hasAnchors' | 'customTask' | 'singleLine' | 'simpleQuoteOnly' | 'unsafe' | 'noSibling'
+  | 'sectionTitles' | 'sectionIds' | 'sectionAnchors' | 'sectionBoundary' | 'sectionNoSibling' | 'sectionFold' | 'hiddenCursor' | 'sectionSelection';
 export class BlockError extends Error {
   constructor(readonly reason: Reason) { super(reason); }
 }

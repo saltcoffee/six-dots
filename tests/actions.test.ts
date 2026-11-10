@@ -28,6 +28,7 @@ vi.mock('obsidian', async () => {
   };
 });
 vi.mock('../src/ui/dialogs', () => ({
+  ManagedModal: class {},
   ExtractModal: class {
     onDismiss = () => undefined;
     constructor(_app: unknown, _t: unknown, _data: unknown, submit: Submit) { ui.submits.push(submit); }

@@ -18,6 +18,7 @@ import type { Settings } from './settings';
 import type { Message, Translate } from '../i18n';
 import { ConfirmLinkModal, LinkModal, ExtractModal } from '../ui/dialogs';
 import type { ManagedModal } from '../ui/dialogs';
+import { Moves } from './moves';
 
 export class Actions {
   alive = true;
@@ -25,7 +26,8 @@ export class Actions {
   private modals = new Set<ManagedModal>();
   private menus = new Set<Menu>();
   private extracting = new Set<TFile>();
-  constructor(readonly app: App, readonly t: Translate, readonly settings: () => Settings) {}
+  readonly moves: Moves;
+  constructor(readonly app: App, readonly t: Translate, readonly settings: () => Settings) { this.moves = new Moves(app, t, this); }
 
   notify(message: string): void { if (this.alive) new Notice(message); }
   error(error: unknown, report = (message: string) => this.notify(message)): void { report(this.t(error instanceof BlockError ? error.reason : 'failed')); }
@@ -64,7 +66,7 @@ export class Actions {
   }
   move(view: EditorView, target: Target, direction: -1 | 1): void {
     if (this.folded(view, target.block)) { this.notify(this.t('foldHeading')); return; }
-    try { this.apply(view, target, moveBy(target.snapshot, target.block, direction)); } catch (error) { this.error(error); }
+    try { this.moves.block(view, target, moveBy(target.snapshot, target.block, direction)); } catch (error) { this.error(error); }
   }
   showMenu(view: EditorView, target: Target, point: { x: number; y: number }, onHide: () => void, announce?: (message: string) => void): Menu {
     // Keep Escape and focus handling in the originating document, including popout windows.
@@ -114,6 +116,14 @@ export class Actions {
       let enabled = !this.folded(view, block);
       try { enabled &&= moveBy(target.snapshot, block, direction) !== null; } catch { enabled = false; }
       menu.addItem(item => item.setTitle(t(direction < 0 ? 'moveUp' : 'moveDown')).setIcon(direction < 0 ? 'arrow-up' : 'arrow-down').setDisabled(!enabled).onClick(() => this.move(view, target, direction)));
+    }
+    if (block.kind === 'heading') {
+      menu.addSeparator();
+      for (const direction of [-1, 1] as const) {
+        const reason = this.moves.reason(view, target, direction), label = t(direction < 0 ? 'sectionMoveUp' : 'sectionMoveDown');
+        menu.addItem(item => item.setTitle(reason ? `${label} — ${t(reason)}` : label).setDisabled(!!reason)
+          .setIcon(direction < 0 ? 'arrow-up' : 'arrow-down').onClick(() => this.moves.section(view, target, direction)));
+      }
     }
     menu.showAtPosition(point, view.dom.ownerDocument);
     return menu;
@@ -217,6 +227,7 @@ export class Actions {
   }
   destroy(): void {
     this.alive = false;
+    this.moves.destroy();
     for (const menu of this.menus) menu.hide();
     for (const modal of this.modals) modal.close();
     this.menus.clear(); this.modals.clear();

@@ -11,6 +11,8 @@ import type { Target } from './context';
 import { SnapshotCache } from './snapshot-cache';
 import { fitPoint, intersect, toFixedPoint, viewportBounds } from './viewport';
 import type { Point } from './viewport';
+import { sectionHistory } from './section-folds';
+import { sectionPeerFilter } from './section-peers';
 
 interface Drag {
   target: Target; pointer: number; x: number; y: number; currentX: number; currentY: number;
@@ -83,6 +85,7 @@ export class Controller {
         this.listen(doc.defaultView.visualViewport, 'scroll', () => this.measure());
       }
     }
+    this.actions.moves.attach(view, { cache: this.cache, rebuild: () => this.prepare(), refresh: () => this.refresh() });
     this.prepare();
   }
   private listen(target: EventTarget, type: string, callback: EventListener, capture = false): void {
@@ -97,6 +100,7 @@ export class Controller {
   private syncContext(): boolean {
     const file = fileFor(this.view);
     if (file === this.file && file?.path === this.path) return false;
+    this.actions.moves.contextChanged();
     this.file = file; this.path = file?.path;
     if (this.menu || this.drag) this.actions.notify(this.actions.t('changed'));
     this.menu?.hide(); this.cancel(); this.clearHide();
@@ -105,9 +109,11 @@ export class Controller {
   }
   update(update: ViewUpdate): void {
     if (this.disposed || this.syncContext()) return;
+    const staged = this.actions.moves.update(update);
     if (update.docChanged) {
       if ((this.menu || this.drag) && !this.actions.committing.has(this.view)) this.actions.notify(this.actions.t('changed'));
-      this.menu?.hide(); this.cancel(); this.prepare();
+      this.menu?.hide(); this.cancel();
+      if (!staged) this.prepare();
     }
     else if (update.selectionSet) this.refresh();
     if (update.viewportChanged || update.geometryChanged) this.measure();
@@ -306,7 +312,7 @@ export class Controller {
     const bounds = this.view.scrollDOM.getBoundingClientRect();
     this.point = event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom ? { x: event.clientX, y: event.clientY } : null;
     this.drag = null; this.resetDrag(drag.pointer);
-    if (wasActive && drag.plan) this.actions.apply(this.view, drag.target, drag.plan);
+    if (wasActive && drag.plan) this.actions.moves.block(this.view, drag.target, drag.plan);
     else if (!wasActive && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) <= (drag.touch ? 8 : 5)) this.openMenu();
     this.refresh();
   }
@@ -328,6 +334,7 @@ export class Controller {
   destroy(): void {
     if (this.disposed) return;
     this.disposed = true; this.cache.cancel(); this.menu?.hide(); this.clearHide(); this.cancel();
+    this.actions.moves.detach(this.view);
     this.cleanup.forEach(cleanup => cleanup()); this.cleanup = [];
     for (const element of [this.button, this.indicator, this.preview, this.status]) element.remove();
     this.remove();
@@ -335,7 +342,7 @@ export class Controller {
 }
 
 export function editorExtension(actions: Actions, controllers: Map<EditorView, Controller>) {
-  return [EditorView.editorAttributes.of(view => fileFor(view) ? { class: `six-dots-editor${usesTouchUI(view) ? ' six-dots-touch-editor' : ''}` } : null), ViewPlugin.define(view => {
+  return [sectionHistory, sectionPeerFilter, EditorView.editorAttributes.of(view => fileFor(view) ? { class: `six-dots-editor${usesTouchUI(view) ? ' six-dots-touch-editor' : ''}` } : null), ViewPlugin.define(view => {
     let controller: Controller | null = null;
     const sync = () => {
       if (fileFor(view) && !controller) { controller = new Controller(view, actions, () => controllers.delete(view)); controllers.set(view, controller); }
