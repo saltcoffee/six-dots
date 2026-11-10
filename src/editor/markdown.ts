@@ -2,6 +2,8 @@ import { parser, GFM } from '@lezer/markdown';
 import type { SyntaxNode, Tree } from '@lezer/common';
 import type { Block, BlockId, BlockKind, ListMarker, Snapshot, Span } from '../domain/block';
 import { quotePrefixLength } from '../domain/convert';
+import type { Heading } from '../domain/section';
+import { headingFact } from './heading-facts';
 
 export const markdownParser = parser.configure(GFM);
 
@@ -125,6 +127,13 @@ export function frontmatterEnd(text: string): number {
 }
 
 export function parseSnapshot(text: string, tree?: Tree): Snapshot {
+  const steps = snapshotSteps(text, tree);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+export function* snapshotSteps(text: string, tree?: Tree): Generator<void, Snapshot> {
   const fmEnd = frontmatterEnd(text);
   const masked = fmEnd ? text.slice(0, fmEnd).replace(/[^\n\r]/g, ' ') + text.slice(fmEnd) : text;
   const syntax = tree ?? markdownParser.parse(masked);
@@ -132,36 +141,49 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
   const ids: BlockId[] = [];
   const definitions: Span[] = [];
   const headingSpans: Span[] = [];
+  const headings: Heading[] = [];
   const tableRanges: Span[] = [];
   const nodeIds = new Map<number, BlockId>();
   const idListOwners = new Map<BlockId, number>();
   const rootNodes = children(syntax.topNode);
-  const protectedRanges: Span[] = [];
-  let delimiter: string | null = null, opening = 0, offset = 0;
+  const protectedRanges: Span[] = [], opaqueRanges: Span[] = [];
+  const codeAt = (at: number) => {
+    for (let node: SyntaxNode | null = syntax.resolveInner(at, 1); node; node = node.parent) {
+      if (['FencedCode', 'CodeBlock', 'InlineCode', 'HTMLBlock'].includes(node.name)) return true;
+    }
+    return false;
+  };
+  let delimiter: string | null = null, opening = 0, openingLine = 0, offset = 0;
   for (const line of text.split('\n')) {
+    yield;
     const end = offset + line.length;
     if (offset < fmEnd) { offset = end + 1; continue; }
+    let position = 0;
     if (delimiter) {
-      if (line.includes(delimiter)) { protectedRanges.push({ from: opening, to: end }); delimiter = null; }
-    } else {
-      let code = false;
-      for (let node: SyntaxNode | null = syntax.resolveInner(Math.min(end, offset + line.search(/\S|$/)), 1); node; node = node.parent) {
-        if (['FencedCode', 'CodeBlock', 'HTMLBlock'].includes(node.name)) code = true;
-      }
-      if (!code) {
-        const token = /^\s*\$\$/.test(line) ? '$$' : line.includes('%%') ? '%%' : null;
-        if (token) {
-          if (line.indexOf(token, line.indexOf(token) + token.length) >= 0) protectedRanges.push({ from: offset, to: end });
-          else { opening = offset; delimiter = token; }
-        }
-      }
+      const close = line.indexOf(delimiter);
+      if (close < 0) { offset = end + 1; continue; }
+      protectedRanges.push({ from: openingLine, to: end });
+      opaqueRanges.push({ from: opening, to: offset + close + delimiter.length });
+      position = close + delimiter.length; delimiter = null;
+    }
+    while (position < line.length) {
+      const math = position === 0 && /^\s*\$\$/.test(line);
+      const token = math ? '$$' : '%%', from = line.indexOf(token, position);
+      if (from < 0) break;
+      if (codeAt(offset + from)) { position = from + token.length; continue; }
+      const close = line.indexOf(token, from + token.length);
+      if (close < 0) { opening = offset + from; openingLine = offset; delimiter = token; break; }
+      protectedRanges.push({ from: offset, to: end });
+      opaqueRanges.push({ from: offset + from, to: offset + close + token.length });
+      position = close + token.length;
     }
     offset = end + 1;
   }
-  if (delimiter) protectedRanges.push({ from: opening, to: text.length });
+  if (delimiter) { protectedRanges.push({ from: openingLine, to: text.length }); opaqueRanges.push({ from: opening, to: text.length }); }
   // The standard parser does not know Obsidian math/comments. Protect each enclosing root whole.
   const protectedRoots: Span[] = [];
   for (const span of protectedRanges) {
+    yield;
     const overlap = rootNodes.filter(node => node.from < span.to && node.to > span.from);
     const expanded = { from: Math.min(span.from, overlap[0]?.from ?? span.from), to: Math.max(span.to, overlap.at(-1)?.to ?? span.to) };
     const previous = protectedRoots.at(-1);
@@ -169,30 +191,46 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
     else protectedRoots.push(expanded);
   }
   const excluded = (from: number, to: number) => protectedRoots.some(span => span.from < to && span.to > from);
-  syntax.iterate({ enter(node) {
-    if (node.name !== 'Document' && excluded(node.from, node.to)) return false;
+  function inspect(node: SyntaxNode): boolean {
     if (['FencedCode', 'CodeBlock', 'InlineCode', 'HTMLBlock'].includes(node.name)) return false;
     // Protect table source positions at every depth without disabling the enclosing block.
     if (node.name === 'Table') {
-      tableRanges.push({ from: lineStart(text, node.from), to: contentEnd(text, node) });
+      if (!excluded(node.from, node.to)) tableRanges.push({ from: lineStart(text, node.from), to: contentEnd(text, node) });
       return false;
     }
-    if (/^(ATX|Setext)Heading/.test(node.name)) headingSpans.push({ from: node.from, to: node.to });
+    if (/^(ATX|Setext)Heading/.test(node.name)) {
+      const mark = node.getChild('HeaderMark')?.from ?? node.from;
+      if (!opaqueRanges.some(span => span.from <= node.from && node.from < span.to || span.from <= mark && mark < span.to)) {
+        headingSpans.push({ from: node.from, to: node.to });
+        headings.push(headingFact(text, node));
+      }
+    }
+    // Protected edit roots can contain a real heading before an inline comment.
+    // Keep its refusal facts while still excluding headings inside opaque content.
+    if (node.name !== 'Document' && excluded(node.from, node.to)) return true;
     if (node.name === 'LinkReference' || /^\[\^[^\]]+\]:/.test(text.slice(node.from, lineEnd(text, node.from)))) definitions.push({ from: node.from, to: node.to });
-    if (!['Paragraph', 'Task'].includes(node.name) && !/^ATXHeading[1-6]$/.test(node.name)) return;
+    if (!['Paragraph', 'Task'].includes(node.name) && !/^ATXHeading[1-6]$/.test(node.name)) return true;
     const match = /(?:^|[ \t])\^([A-Za-z0-9-]+)[ \t]*$/.exec(text.slice(node.from, contentEnd(text, node)));
-    if (!match) return;
+    if (!match) return true;
     const from = node.from + match.index + match[0].indexOf('^');
     for (let n: SyntaxNode | null = syntax.resolveInner(from, 1); n && n.from >= node.from; n = n.parent) {
-      if (n.name === 'InlineCode') return;
+      if (n.name === 'InlineCode') return true;
     }
     const id = { value: match[1] ?? '', from, to: from + (match[1]?.length ?? 0) + 1 };
     ids.push(id);
     nodeIds.set(node.from, id);
-    for (let parent = node.node.parent; parent; parent = parent.parent) {
+    for (let parent = node.parent; parent; parent = parent.parent) {
       if (parent.name === 'ListItem') { idListOwners.set(id, parent.from); break; }
     }
-  } });
+    return true;
+  }
+  const cursor = syntax.cursor();
+  walk: for (;;) {
+    const descend = inspect(cursor.node);
+    yield;
+    if (descend && cursor.firstChild()) continue;
+    while (!cursor.nextSibling()) if (!cursor.parent()) break walk;
+  }
   const counts = new Map<string, number>();
   ids.forEach(id => counts.set(id.value, (counts.get(id.value) ?? 0) + 1));
   const duplicates = new Set([...counts].filter(([, count]) => count > 1).map(([value]) => value));
@@ -222,8 +260,9 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
     return block;
   }
 
-  function list(node: SyntaxNode): void {
+  function* list(node: SyntaxNode): Generator<void> {
     for (const item of children(node).filter(child => child.name === 'ListItem')) {
+      yield;
       const firstLine = text.slice(lineStart(text, item.from), lineEnd(text, item.from));
       const match = /^(\s*)([-+*]|\d{1,9}[.)])([ \t]+|$)(?:\[([^\]])\](?:[ \t]+|$))?/.exec(firstLine);
       if (!match) continue;
@@ -235,11 +274,12 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
       const compact = content && ['BulletList', 'OrderedList'].includes(content.name) && lineStart(text, content.from) === lineStart(text, item.from);
       make(item, `list:${node.from}`, compact ? 'protected' : 'list-item', marker);
       if (compact) continue;
-      for (const child of children(item)) if (['BulletList', 'OrderedList'].includes(child.name)) list(child);
+      for (const child of children(item)) if (['BulletList', 'OrderedList'].includes(child.name)) yield* list(child);
     }
   }
 
   for (const node of rootNodes) {
+    yield;
     if (excluded(node.from, node.to)) continue;
     const source = text.slice(node.from, contentEnd(text, node));
     if (/^\^[A-Za-z0-9-]+[ \t]*$/.test(source)) {
@@ -263,16 +303,17 @@ export function parseSnapshot(text: string, tree?: Tree): Snapshot {
     if (source.startsWith('$$') || /^\[\^[^\]]+\]:/.test(source) || /^\^[A-Za-z0-9-]+\s*$/.test(source) || definitions.some(span => span.from >= node.from && span.from < node.to) && kind !== 'list') kind = 'protected';
     const block = make(node, 'root', kind);
     roots.push(block);
-    if (kind === 'list') list(node);
+    if (kind === 'list') yield* list(node);
   }
   for (const span of protectedRoots) {
     const block: Block = { ...span, contentTo: span.to, kind: 'protected', group: 'root', text: text.slice(span.from, span.to), ownId: null, hasIds: false, ambiguousIds: false, hasHeadings: false, hasChildren: false, marker: null };
     roots.push(block); blocks.push(block);
   }
+  yield;
   roots.sort((a, b) => a.from - b.from);
   // Children precede parents for hit testing, without changing their actual source ranges.
   blocks.sort((a, b) => (a.to - a.from) - (b.to - b.from));
-  return { text, blocks, roots, ids, tableRanges, frontmatterEnd: fmEnd };
+  return { text, blocks, roots, ids, tableRanges, frontmatterEnd: fmEnd, headings };
 }
 
 export function excludedInlineRanges(text: string): readonly Span[] {

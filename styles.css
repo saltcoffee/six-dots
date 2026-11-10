@@ -48,6 +48,21 @@
 .six-dots-link { width: 100%; min-height: 90px; resize: vertical; }
 .six-dots-summary { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
 .six-dots-path { overflow-wrap: anywhere; color: var(--text-muted); }
+.six-dots-section-modal { width: 540px; display: flex; flex-direction: column; box-sizing: border-box; }
+.six-dots-section-modal .modal-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.six-dots-section-summary { overflow-wrap: anywhere; }
+.six-dots-section-heading { white-space: pre-wrap; font-weight: var(--font-semibold); }
+.six-dots-section-warning { color: var(--text-warning); }
+.six-dots-move-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.six-dots-move-controls button, .six-dots-move-progress button { min-height: 44px; min-width: 44px; white-space: normal; }
+.six-dots-move-progress {
+  position: fixed; z-index: 110; inset-inline: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m);
+  background: var(--background-primary); color: var(--text-normal); box-shadow: var(--shadow-s);
+  overflow-wrap: anywhere;
+}
 .is-mobile .six-dots-modal { max-width: calc(100vw - 24px); }
 .is-mobile .six-dots-modal .modal-content { overflow-y: auto; }
 .is-mobile .six-dots-modal .setting-item { flex-wrap: wrap; gap: 12px; }

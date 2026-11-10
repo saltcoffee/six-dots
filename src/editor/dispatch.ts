@@ -34,16 +34,10 @@ function validateUnquote(target: Target, plan: Plan, changes: ChangeSet, candida
   })) throw new BlockError('unsafe');
 }
 
-export function dispatchPlan(view: EditorView, target: Target, plan: Plan, format?: Format): CommitResult {
-  if (!targetValid(view, target)) return 'rejected';
-  const before = view.state.doc;
-  try {
-    const changes = ChangeSet.of([...plan.edits], before.length);
-    const expected = changes.apply(before);
-    const text = expected.toString();
-    const candidate = parseSnapshot(text);
+export function validateCandidate(target: Target, plan: Plan, changes: ChangeSet, candidate: Snapshot, format?: Format): void {
+    const text = candidate.text;
     if (text.slice(0, candidate.frontmatterEnd) !== target.snapshot.text.slice(0, target.snapshot.frontmatterEnd)) throw new BlockError('unsafe');
-    const cursor = Math.min(plan.cursor, expected.length);
+    const cursor = Math.min(plan.cursor, text.length);
     if (format === 'paragraph' && target.block.kind === 'quote') {
       validateUnquote(target, plan, changes, candidate);
     } else if (format) {
@@ -70,7 +64,17 @@ export function dispatchPlan(view: EditorView, target: Target, plan: Plan, forma
         if (!after || after.kind !== owner.kind || after.from !== changes.mapPos(owner.from, -1)) throw new BlockError('unsafe');
       }
     }
-    const transaction = view.state.update({ changes, selection: EditorSelection.cursor(cursor), annotations: isolateHistory.of('full'), scrollIntoView: true });
+}
+
+export function dispatchPlan(view: EditorView, target: Target, plan: Plan, format?: Format): CommitResult {
+  if (!targetValid(view, target)) return 'rejected';
+  const before = view.state.doc;
+  try {
+    const changes = ChangeSet.of([...plan.edits], before.length);
+    const expected = changes.apply(before);
+    const candidate = parseSnapshot(expected.toString());
+    validateCandidate(target, plan, changes, candidate, format);
+    const transaction = view.state.update({ changes, selection: EditorSelection.cursor(Math.min(plan.cursor, expected.length)), annotations: isolateHistory.of('full'), scrollIntoView: true });
     if (!transaction.newDoc.eq(expected) || transaction.startState !== view.state) return 'rejected';
     view.dispatch(transaction);
     if (!view.state.doc.eq(expected)) return view.state.doc.eq(before) ? 'rejected' : 'diverged';

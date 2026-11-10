@@ -71,6 +71,7 @@ export function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false, ios = 
   const actions = {
     t: (key: string) => key, settings: () => settings,
     committing: new Set(), notify: vi.fn(), showMenu, apply, folded: () => false,
+    moves: { attach: vi.fn(), detach: vi.fn(), contextChanged: vi.fn(), update: vi.fn(() => false), block: apply },
   } as unknown as Actions;
   const controller = new Controller(view, actions, vi.fn());
   controllers.push(controller);
@@ -104,9 +105,9 @@ export function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false, ios = 
       phase = 'update';
       try {
         controller.update({
-          view, state: host.state, docChanged: transaction.docChanged, selectionSet: !!spec.selection,
+          view, state: host.state, startState: transaction.startState, transactions: [transaction], docChanged: transaction.docChanged, selectionSet: !!spec.selection,
           viewportChanged: geometryChanged, geometryChanged,
-        } as ViewUpdate);
+        } as unknown as ViewUpdate);
       } finally { phase = 'idle'; }
     },
     measure() {
