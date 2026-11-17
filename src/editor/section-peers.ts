@@ -50,6 +50,7 @@ export const sectionPeerFilter: Extension = [peerBinding, EditorState.transactio
 
 export class SectionPeers {
   private cleanups = new Set<() => void>();
+  private receipts = new Map<EditorView, (state: EditorState) => void>();
   constructor(private views: () => readonly EditorView[], private diverged: () => void) {}
   arm(source: EditorView, before: Text, after: Text, mapping: SectionMapping): void {
     const file = fileFor(source);
@@ -69,9 +70,18 @@ export class SectionPeers {
         if (!move.active) return;
         clear();
         if (!success) this.diverged();
-        else queueMicrotask(() => {
-          if (!view.state.doc.eq(after) || !view.state.selection.eq(selection, true) || !sameFolds(readFolds(view.state), folds)) this.diverged();
-        });
+        else {
+          const verify = (received: EditorState) => {
+            if (!received.doc.eq(after) || !received.selection.eq(selection, true) || !sameFolds(readFolds(received), folds)) this.diverged();
+          };
+          this.receipts.set(view, verify);
+          queueMicrotask(() => {
+            // A real ViewUpdate checks the received transaction itself. Later independent
+            // transactions in the same turn must not invalidate that completed receipt.
+            if (this.receipts.get(view) !== verify) return;
+            this.receipts.delete(view); verify(view.state);
+          });
+        }
       };
       const timer = setTimeout(() => done(false), 2000);
       const move: Pending = { after, mapping, file, path: file.path, active: true, done };
@@ -80,8 +90,12 @@ export class SectionPeers {
     }
   }
   update(update: ViewUpdate): void {
+    const verify = this.receipts.get(update.view);
+    if (verify && update.transactions?.some(tr => tr.annotation(peerSectionMove))) {
+      this.receipts.delete(update.view); verify(update.state);
+    }
     const move = pendingFor(update.startState);
     if (move && pendingFor(update.state) !== move) move.done(false);
   }
-  destroy(): void { for (const clear of this.cleanups) clear(); }
+  destroy(): void { for (const clear of this.cleanups) clear(); this.receipts.clear(); }
 }

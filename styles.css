@@ -53,6 +53,10 @@
 .six-dots-section-summary { overflow-wrap: anywhere; }
 .six-dots-section-heading { white-space: pre-wrap; font-weight: var(--font-semibold); }
 .six-dots-section-warning { color: var(--text-warning); }
+.six-dots-range-modal .modal-content { display: flex; flex-direction: column; overflow: hidden; }
+.six-dots-range-modal .six-dots-section-summary { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.six-dots-range-modal .modal-content > :not(.six-dots-section-summary) { flex-shrink: 0; }
+.six-dots-order-omitted { list-style: none; color: var(--text-muted); }
 .six-dots-move-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .six-dots-move-controls button, .six-dots-move-progress button { min-height: 44px; min-width: 44px; white-space: normal; }
 .six-dots-move-progress {

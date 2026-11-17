@@ -21,6 +21,15 @@ vi.mock('obsidian', async () => {
     resolveSubpath: (cache: { headings: unknown[] }) => ({ type: 'heading', current: cache.headings[0] }),
     editorInfoField: StateField.define({ create: () => new MarkdownView(), update: value => value }) };
 });
+vi.mock('../src/ui/range-move-modal', () => ({
+  RangeMoveModal: class {
+    onDismiss = () => undefined;
+    open() {}
+    ready() {}
+    expire() {}
+    close() { this.onDismiss(); }
+  },
+}));
 vi.mock('../src/ui/section-move-modal', () => ({
   SectionMoveModal: class {
     onDismiss = () => undefined;
@@ -48,7 +57,7 @@ function setup() {
     composing: false, focus: vi.fn(), dispatch: (() => undefined) as (tr: Transaction) => void,
   };
   const view = raw as unknown as EditorView;
-  const moves = new Moves({} as App, key => key, { committing, valid: (v, t) => v.state.doc === t.doc && t.file.path === t.path && v.dom.isConnected, notify, error });
+  const moves = new Moves({} as App, key => key, { committing, valid: (v, t) => v.state.doc === t.doc && t.file.path === t.path && v.dom.isConnected, validContext: (v, t) => v.state.doc === t.doc && t.file.path === t.path && v.dom.isConnected, notify, error, preserveLineEndings: vi.fn() });
   const cache = new SnapshotCache(); cache.adopt(parseSnapshot(raw.state.doc.toString()));
   const rebuild = vi.fn(() => cache.prepare(raw.state.doc.toString(), () => undefined));
   moves.attach(view, { cache, rebuild, refresh: vi.fn() });

@@ -20,7 +20,7 @@ vi.mock('obsidian', async () => {
     get name() { return this.path.split('/').at(-1)!; }
   }
   class TFolder { children: TFile[] = []; }
-  class MarkdownView { file: TFile | null = null; getMode() { return 'source'; } }
+  class MarkdownView { file: TFile | null = null; data = ''; getMode() { return 'source'; } }
   return {
     TFile, TFolder, MarkdownView, PluginSettingTab: class {}, Setting: class {},
     Notice: class { constructor(message: string | { text: string }) { ui.notices.push(typeof message === 'string' ? message : message.text); } },

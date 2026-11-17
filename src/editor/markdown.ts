@@ -235,7 +235,8 @@ export function* snapshotSteps(text: string, tree?: Tree): Generator<void, Snaps
   ids.forEach(id => counts.set(id.value, (counts.get(id.value) ?? 0) + 1));
   const duplicates = new Set([...counts].filter(([, count]) => count > 1).map(([value]) => value));
 
-  function make(node: SyntaxNode, group: string, kind: BlockKind, marker: ListMarker | null = null): Block {
+  function make(node: SyntaxNode, group: string, kind: BlockKind, marker: ListMarker | null = null,
+    extra: { owned?: readonly Span[]; parentFrom?: number | null } = {}): Block {
     const from = lineStart(text, node.from), to = contentEnd(text, node);
     const source = text.slice(from, to);
     const nestedIds = ids.filter(id => from <= id.from && id.to <= to);
@@ -254,13 +255,15 @@ export function* snapshotSteps(text: string, tree?: Tree): Generator<void, Snaps
       ambiguousIds: unclearListId || unclearQuoteId || nestedIds.some(id => duplicates.has(id.value)),
       hasHeadings: headingSpans.some(heading => from <= heading.from && heading.to <= to),
       hasChildren: children(node).some(child => ['BulletList', 'OrderedList', 'Blockquote', 'FencedCode', 'CodeBlock'].includes(child.name)) || children(node).filter(child => ['Paragraph', 'Task'].includes(child.name)).length > 1,
+      owned: extra.owned ?? [{ from, to }],
+      parentFrom: extra.parentFrom ?? null,
       ...(kind === 'quote' && quoteParagraphs(node) ? { flatQuote: true as const } : {}),
     };
     blocks.push(block);
     return block;
   }
 
-  function* list(node: SyntaxNode): Generator<void> {
+  function* list(node: SyntaxNode, parentFrom: number | null = null): Generator<void> {
     for (const item of children(node).filter(child => child.name === 'ListItem')) {
       yield;
       const firstLine = text.slice(lineStart(text, item.from), lineEnd(text, item.from));
@@ -272,9 +275,17 @@ export function* snapshotSteps(text: string, tree?: Tree): Generator<void, Snaps
       const marker: ListMarker = { indent, marker: mark, spacing, contentColumn: indent.length + mark.length + spacing.length, number: /^\d/.test(mark) ? Number.parseInt(mark) : null, task: match[4] ?? null, textRange };
       // A child list on the same source line shares its parent's marker. Never expose a partial range.
       const compact = content && ['BulletList', 'OrderedList'].includes(content.name) && lineStart(text, content.from) === lineStart(text, item.from);
-      make(item, `list:${node.from}`, compact ? 'protected' : 'list-item', marker);
+      // Owned content is direct text/markers; descendant lists and gaps are never part of it.
+      const owned: Span[] = [];
+      for (const child of children(item)) {
+        if (['BulletList', 'OrderedList'].includes(child.name)) continue;
+        const end = contentEnd(text, child);
+        if (end > child.from) owned.push({ from: child.from, to: end });
+      }
+      owned.sort((a, b) => a.from - b.from);
+      make(item, `list:${node.from}`, compact ? 'protected' : 'list-item', marker, { owned, parentFrom });
       if (compact) continue;
-      for (const child of children(item)) if (['BulletList', 'OrderedList'].includes(child.name)) yield* list(child);
+      for (const child of children(item)) if (['BulletList', 'OrderedList'].includes(child.name)) yield* list(child, item.from);
     }
   }
 
@@ -287,7 +298,7 @@ export function* snapshotSteps(text: string, tree?: Tree): Generator<void, Snaps
       if (previous && id && /^\s*$/.test(text.slice(previous.to, node.from))) {
         const known = ['quote', 'callout', 'list', 'code'].includes(previous.kind);
         const to = contentEnd(text, node);
-        const updated: Block = { ...previous, to, text: text.slice(previous.from, to), ownId: known ? id : null, hasIds: true, ambiguousIds: !known || previous.ambiguousIds || duplicates.has(id.value) };
+        const updated: Block = { ...previous, to, text: text.slice(previous.from, to), ownId: known ? id : null, hasIds: true, ambiguousIds: !known || previous.ambiguousIds || duplicates.has(id.value), owned: [{ from: previous.from, to }] };
         roots[roots.length - 1] = updated;
         const at = blocks.indexOf(previous);
         if (at >= 0) blocks[at] = updated;

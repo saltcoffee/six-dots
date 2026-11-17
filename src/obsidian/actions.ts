@@ -11,14 +11,15 @@ import type { Format, Plan, Snapshot, Block } from '../domain/block';
 import { runExtraction } from '../application/extraction';
 import { dispatchPlan } from '../editor/dispatch';
 import { safePlainQuote } from '../editor/markdown';
-import { targetValid } from '../editor/context';
-import type { Target } from '../editor/context';
+import { contextValid, targetValid } from '../editor/context';
+import type { MoveContext, Target } from '../editor/context';
 import { pointsToFile, rewriteLinks } from './links';
 import type { Settings } from './settings';
 import type { Message, Translate } from '../i18n';
 import { ConfirmLinkModal, LinkModal, ExtractModal } from '../ui/dialogs';
 import type { ManagedModal } from '../ui/dialogs';
 import { Moves } from './moves';
+import { LineEndings } from './line-endings';
 
 export class Actions {
   alive = true;
@@ -27,11 +28,16 @@ export class Actions {
   private menus = new Set<Menu>();
   private extracting = new Set<TFile>();
   readonly moves: Moves;
-  constructor(readonly app: App, readonly t: Translate, readonly settings: () => Settings) { this.moves = new Moves(app, t, this); }
+  private lineEndings: LineEndings;
+  constructor(readonly app: App, readonly t: Translate, readonly settings: () => Settings) {
+    this.lineEndings = new LineEndings(app); this.moves = new Moves(app, t, this);
+  }
 
   notify(message: string): void { if (this.alive) new Notice(message); }
   error(error: unknown, report = (message: string) => this.notify(message)): void { report(this.t(error instanceof BlockError ? error.reason : 'failed')); }
   valid(view: EditorView, target: Target): boolean { return this.alive && targetValid(view, target) && this.app.vault.getAbstractFileByPath(target.path) === target.file; }
+  validContext(view: EditorView, target: MoveContext): boolean { return this.alive && contextValid(view, target) && this.app.vault.getAbstractFileByPath(target.path) === target.file; }
+  preserveLineEndings(view: EditorView): void { this.lineEndings.preserve(view); }
   apply(view: EditorView, target: Target, plan: Plan | null, format?: Format, report = (message: string) => this.notify(message)): boolean {
     if (!this.valid(view, target)) { report(this.t('changed')); return false; }
     if (!plan) return true;
@@ -42,6 +48,7 @@ export class Actions {
     } catch (error) { this.error(error, report); return false; }
   }
   private commit(view: EditorView, target: Target, plan: Plan, format?: Format) {
+    this.preserveLineEndings(view);
     this.committing.add(view);
     try { return dispatchPlan(view, target, plan, format); }
     finally { this.committing.delete(view); }
@@ -228,6 +235,7 @@ export class Actions {
   destroy(): void {
     this.alive = false;
     this.moves.destroy();
+    this.lineEndings.destroy();
     for (const menu of this.menus) menu.hide();
     for (const modal of this.modals) modal.close();
     this.menus.clear(); this.modals.clear();

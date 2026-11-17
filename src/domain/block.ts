@@ -28,6 +28,10 @@ export interface Block extends Span {
   readonly hasChildren: boolean;
   readonly flatQuote?: true;
   readonly marker: ListMarker | null;
+  /** Direct content spans: own text and markers, excluding descendant items and inter-block gaps. */
+  readonly owned?: readonly Span[];
+  /** For list items, the source offset of the parent item; null for top-level items and root blocks. */
+  readonly parentFrom?: number | null;
 }
 export interface Snapshot {
   readonly text: string;
@@ -40,7 +44,8 @@ export interface Snapshot {
 }
 export interface Plan { readonly edits: readonly Edit[]; readonly cursor: number; readonly createdId?: string; readonly quoteEscapes?: readonly number[] }
 export type Reason = 'unsupported' | 'hasIds' | 'hasAnchors' | 'customTask' | 'singleLine' | 'simpleQuoteOnly' | 'unsafe' | 'noSibling'
-  | 'sectionTitles' | 'sectionIds' | 'sectionAnchors' | 'sectionBoundary' | 'sectionNoSibling' | 'sectionFold' | 'hiddenCursor' | 'sectionSelection';
+  | 'sectionTitles' | 'sectionIds' | 'sectionAnchors' | 'sectionBoundary' | 'sectionNoSibling' | 'sectionFold' | 'hiddenCursor' | 'sectionSelection'
+  | 'rangeEmpty' | 'rangeSingle' | 'rangeMixedGroups' | 'rangeProtected' | 'rangeNoSibling' | 'rangeSelection' | 'rangeSelectionRoundTrip' | 'rangeExpired' | 'rangeNumbering';
 export class BlockError extends Error {
   constructor(readonly reason: Reason) { super(reason); }
 }
