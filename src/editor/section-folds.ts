@@ -6,12 +6,15 @@ import { BlockError } from '../domain/block';
 import type { Snapshot, Span } from '../domain/block';
 import { mapSectionPosition, sectionSteps } from '../domain/section';
 import type { RangeMapping, Section, SectionMove } from '../domain/section';
+import { invertContentMapping, mapContentFolds, mapContentSelection, rebaseContentMapping } from './content-mapping';
+import type { ContentMapping } from './content-mapping';
 
 interface HeadingRange { readonly from: number; readonly headingTo: number; readonly to: number }
 export interface SectionMapping {
   readonly ranges: readonly RangeMapping[];
   readonly headings: readonly { readonly before: HeadingRange; readonly after: HeadingRange }[];
   readonly region: Span;
+  readonly content?: ContentMapping;
 }
 export const historyFoldNotice = Annotation.define<boolean>();
 export const sectionCommit = Annotation.define<boolean>();
@@ -19,6 +22,10 @@ const foldsMapped = Annotation.define<boolean>();
 
 function rebase(mapping: SectionMapping, changes: ChangeDesc): SectionMapping | undefined {
   if (changes.empty) return mapping;
+  if (mapping.content) {
+    const content = rebaseContentMapping(mapping.content, changes);
+    return content ? { region: content.before, ranges: content.pieces, headings: [], content } : undefined;
+  }
   let touched = false;
   changes.iterChangedRanges((from, to) => { if (from < mapping.region.to && to > mapping.region.from || from === to && from >= mapping.region.from && from <= mapping.region.to) touched = true; });
   if (touched) return undefined;
@@ -31,6 +38,10 @@ function rebase(mapping: SectionMapping, changes: ChangeDesc): SectionMapping | 
 export const sectionMoveEffect = StateEffect.define<SectionMapping>({ map: rebase });
 
 export function invertSectionMapping(mapping: SectionMapping): SectionMapping {
+  if (mapping.content) {
+    const content = invertContentMapping(mapping.content);
+    return { region: content.before, ranges: content.pieces, headings: [], content };
+  }
   return { region: mapping.region, ranges: mapping.ranges.map(m => ({ before: m.after, after: m.before })),
     headings: mapping.headings.map(h => ({ before: h.after, after: h.before })) };
 }
@@ -73,7 +84,8 @@ export function cursorHidden(state: EditorState): boolean {
   return state.selection.ranges.some(r => folds.some(f => f.from < r.head && r.head < f.to));
 }
 
-export function mapSectionSelection(selection: EditorSelection, mapping: Pick<SectionMapping, 'ranges'>): EditorSelection {
+export function mapSectionSelection(selection: EditorSelection, mapping: Pick<SectionMapping, 'ranges' | 'content'>): EditorSelection {
+  if (mapping.content) return mapContentSelection(selection, mapping.content);
   const ranges = [...mapping.ranges].sort((a, b) => a.before.from - b.before.from);
   const [first, last] = ranges;
   if (first && last) ranges.push({ before: { from: first.before.to, to: last.before.from }, after: { from: last.after.to, to: first.after.from } });
@@ -106,6 +118,7 @@ export function mapSectionSelection(selection: EditorSelection, mapping: Pick<Se
 }
 
 export function mapSectionFolds(folds: readonly Span[], mapping: SectionMapping, length: number): readonly Span[] {
+  if (mapping.content) return mapContentFolds(folds, mapping.content);
   const byHeadingEnd = new Map(mapping.headings.map(h => [h.before.headingTo, h]));
   const result = folds.map(fold => {
     const heading = byHeadingEnd.get(fold.from);

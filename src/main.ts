@@ -1,11 +1,12 @@
 import { Plugin, getLanguage, Notice, editorInfoField } from 'obsidian';
+import type { Editor, Menu } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { Actions } from './obsidian/actions';
 import { decodeSettings, defaults, SixDotsSettingsTab } from './obsidian/settings';
 import type { Settings } from './obsidian/settings';
 import { translator } from './i18n';
 import { Controller, editorExtension } from './editor/controller';
-import { editable, tableFocused } from './editor/context';
+import { editable, rangeEditable, tableFocused } from './editor/context';
 import { conversionReason } from './domain/convert';
 import { extractionReason } from './domain/extract';
 import { siblingBlocks } from './domain/block';
@@ -30,6 +31,7 @@ export default class SixDots extends Plugin {
     this.registerEditorExtension(editorExtension(this.actions, this.controllers));
     this.registerEvent(this.app.vault.on('rename', () => { this.actions.moves.contextChanged(); this.controllers.forEach(controller => controller.refresh()); }));
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.actions.moves.contextChanged()));
+    this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor) => this.addRangeMenu(menu, editor)));
     this.addSettingTab(new SixDotsSettingsTab(this.app, { plugin: this, settings: this.settings, t: this.t,
       save: () => this.saveSettings(), refresh: () => this.controllers.forEach(controller => controller.refresh()) }));
     const commands = [
@@ -38,31 +40,54 @@ export default class SixDots extends Plugin {
       ['move-block-down', 'moveDown', (controller: Controller) => { const target = controller.current(); if (target) this.actions.move(controller.view, target, 1); }],
       ['move-section-up', 'sectionMoveUp', (controller: Controller) => { const target = controller.current(); if (target) this.actions.moves.section(controller.view, target, -1); }],
       ['move-section-down', 'sectionMoveDown', (controller: Controller) => { const target = controller.current(); if (target) this.actions.moves.section(controller.view, target, 1); }],
+      ['move-selected-blocks-up', 'moveSelectedUp', (controller: Controller) => controller.range(-1)],
+      ['move-selected-blocks-down', 'moveSelectedDown', (controller: Controller) => controller.range(1)],
       ['convert-to-task', 'convertTask', (controller: Controller) => { const target = controller.current(); if (target) this.actions.convert(controller.view, target, 'task'); }],
       ['convert-to-callout', 'convertCallout', (controller: Controller) => { const target = controller.current(); if (target && target.block.kind !== 'callout') this.actions.convert(controller.view, target, `callout:${this.settings.callout}`); }],
       ['copy-block-link', 'copyLink', (controller: Controller) => { const target = controller.current(); if (target) this.actions.copyLink(controller.view, target, false); }],
       ['extract-block', 'extract', (controller: Controller) => { const target = controller.current(); if (target) this.actions.extract(controller.view, target); }],
     ] as const;
     for (const [id, name, run] of commands) this.addCommand({ id, name: this.t(name), editorCheckCallback: (checking, editor) => {
-      const entry = [...this.controllers].find(([view]) => view.state.field(editorInfoField, false)?.editor === editor && editable(view) && !tableFocused(view));
+      const entry = [...this.controllers].find(([view]) => view.state.field(editorInfoField, false)?.editor === editor && !tableFocused(view));
       if (!entry) return false;
-      if ((id === 'move-section-up' || id === 'move-section-down') && !entry[1].cache.snapshot) return false;
-      if (entry[1].cache.snapshot) {
-        const target = entry[1].peek();
+      const [view, controller] = entry;
+      if (id === 'move-selected-blocks-up' || id === 'move-selected-blocks-down') {
+        if (!rangeEditable(view)) return false;
+        if (controller.rangeReason(id === 'move-selected-blocks-up' ? -1 : 1)) return false;
+        if (!checking) run(controller);
+        return true;
+      }
+      if (!editable(view)) return false;
+      if ((id === 'move-section-up' || id === 'move-section-down') && !controller.cache.snapshot) return false;
+      if (controller.cache.snapshot) {
+        const target = controller.peek();
         if (!target) return false;
         if (id === 'convert-to-task' && conversionReason(target.block, 'task')) return false;
         if (id === 'convert-to-callout' && (target.block.kind === 'callout' || conversionReason(target.block, `callout:${this.settings.callout}`))) return false;
         if (id === 'extract-block' && extractionReason(target.block)) return false;
         if (id === 'copy-block-link' && blockLinkReason(target.block)) return false;
-        if ((id === 'move-section-up' || id === 'move-section-down') && this.actions.moves.reason(entry[0], target, id === 'move-section-up' ? -1 : 1)) return false;
+        if ((id === 'move-section-up' || id === 'move-section-down') && this.actions.moves.reason(view, target, id === 'move-section-up' ? -1 : 1)) return false;
         if (id === 'move-block-up' || id === 'move-block-down') {
           const siblings = siblingBlocks(target.snapshot, target.block), index = siblings.indexOf(target.block);
-          if (!siblings[index + (id === 'move-block-up' ? -1 : 1)] || this.actions.folded(entry[0], target.block)) return false;
+          if (!siblings[index + (id === 'move-block-up' ? -1 : 1)] || this.actions.folded(view, target.block)) return false;
         }
       }
-      if (!checking) run(entry[1]);
+      if (!checking) run(controller);
       return true;
     } });
+  }
+  private addRangeMenu(menu: Menu, editor: Editor): void {
+    const entry = [...this.controllers].find(([view]) => view.state.field(editorInfoField, false)?.editor === editor);
+    if (!entry) return;
+    const [view, controller] = entry;
+    if (!rangeEditable(view)) return;
+    for (const direction of [-1, 1] as const) {
+      const reason = controller.rangeReason(direction);
+      const label = this.t(direction < 0 ? 'moveSelectedUp' : 'moveSelectedDown');
+      menu.addItem(item => item.setTitle(reason ? `${label} — ${this.t(reason)}` : label)
+        .setIcon(direction < 0 ? 'arrow-up' : 'arrow-down').setDisabled(!!reason)
+        .onClick(() => controller.range(direction)));
+    }
   }
   private saveSettings(): Promise<void> {
     if (this.settingsFuture) return Promise.reject(new Error('Unsupported settings schema'));

@@ -152,6 +152,12 @@ describe('real CM transactions with a minimal host boundary', () => {
     expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('rejected');
     expect(view.state.doc.toString()).toBe('alpha\n\nbeta');
   });
+  it('rejects a stale single-block target once a non-empty selection exists', () => {
+    const { view, target, plan } = setup();
+    view.state = view.state.update({ selection: { anchor: 8, head: 11 } }).state;
+    expect(dispatchPlan(view as unknown as EditorView, target, plan)).toBe('rejected');
+    expect(view.state.doc.toString()).toBe('alpha\n\nbeta');
+  });
   it('rejects stale documents and closed views', () => {
     const { view, target, plan } = setup();
     view.dispatch(view.state.update({ changes: { from: 0, insert: 'changed ' } }));

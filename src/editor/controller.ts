@@ -13,6 +13,7 @@ import { fitPoint, intersect, toFixedPoint, viewportBounds } from './viewport';
 import type { Point } from './viewport';
 import { sectionHistory } from './section-folds';
 import { sectionPeerFilter } from './section-peers';
+import type { Message } from '../i18n';
 
 interface Drag {
   target: Target; pointer: number; x: number; y: number; currentX: number; currentY: number;
@@ -197,6 +198,15 @@ export class Controller {
     const block = atPosition(snapshot, this.view.state.selection.main.head);
     if (!block) { this.actions.notify(this.actions.t('unsupported')); return null; }
     return targetFor(this.view, block, snapshot);
+  }
+  /** Capability of one explicit multi-block direction; null means the move may run. */
+  rangeReason(direction: -1 | 1): Message | null {
+    if (this.disposed || this.syncContext()) return 'changed';
+    return this.actions.moves.rangeReason(this.view, direction);
+  }
+  range(direction: -1 | 1): void {
+    if (this.disposed || this.syncContext()) return;
+    this.actions.moves.range(this.view, direction);
   }
   peek(): Target | null {
     if (this.disposed || this.syncContext()) return null;

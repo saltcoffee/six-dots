@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.7 - 2026-11-17
+
+- Move several consecutive top-level blocks, or several complete list siblings, up or down as one checked group from a plain non-empty selection.
+- Preview the complete range, content added beyond the original selection, unit and descendant counts, folded content, the adjacent target, numbering impact, and the resulting order before confirming.
+- Apply the group exchange in a single isolated editor transaction, keep numbering, block IDs, separators, and folds consistent, and restore the complete source selection with its original direction after one undo.
+- Add **Move selected blocks up/down** commands and host editor-menu entries in English and Chinese without changing the existing single-block or section commands.
+- Cover the new selection rules, exchange planning, transaction proof, preview lifecycle, and bilingual key parity with automated tests; legacy block and section behaviour is unchanged.
+- Keep the source summary visible when a range preview opens, keep its controls accessible, and summarize long order lists with an explicit omitted count.
+- Preserve CRLF when SixDots edits are saved, undone, redone, synchronized across views, or saved while the file closes, using the host serialization boundary.
+
+Core desktop flows were validated in the locally installed Obsidian 1.15.1. Mobile-device, assistive-technology, and real-user comparison checks remain pending.
+
 ## 0.1.6 - 2026-11-10
 
 - Exchange adjacent sections at the same heading level within one parent, including their body and subheadings. Preview both ranges and the new order before confirming.
