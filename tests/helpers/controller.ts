@@ -29,21 +29,54 @@ export function setup(mode: 'hover' | 'cursor' = 'hover', mobile = false, ios = 
   // Keep the host DOM minimal; the layout guard models CodeMirror's update boundary.
   const bounds = { left: 0, top: 0, right: 600, bottom: 400, width: 600, height: 400 };
   let captured: number | null = null;
-  const element = () => Object.assign(new EventTarget(), {
-    hidden: false, className: '', textContent: '', isConnected: true, nodeType: 1, style: { left: '', top: '' },
-    closest: vi.fn<() => Element | null>(() => null), contains: vi.fn(() => false),
-    classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() },
-    setAttribute: vi.fn(), remove: vi.fn(), getBoundingClientRect: () => bounds,
-    setPointerCapture: (id: number) => { captured = id; }, hasPointerCapture: (id: number) => captured === id,
-    releasePointerCapture: () => { captured = null; },
-  });
+  const element = (tag = 'div', ownerDoc?: unknown) => {
+    const attrs = new Map<string, string>();
+    return Object.assign(new EventTarget(), {
+      tagName: tag.toUpperCase(), ownerDocument: ownerDoc, type: '', title: '',
+      hidden: false, className: '', textContent: '', isConnected: true, nodeType: 1, style: { left: '', top: '' },
+      closest: vi.fn<() => Element | null>(() => null), contains: vi.fn(() => false),
+      classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() },
+      setAttribute: vi.fn((key: string, value: string) => { attrs.set(key, value); }),
+      getAttribute: (key: string) => attrs.get(key) ?? null,
+      remove: vi.fn(), getBoundingClientRect: () => bounds,
+      setPointerCapture: (id: number) => { captured = id; }, hasPointerCapture: (id: number) => captured === id,
+      releasePointerCapture: () => { captured = null; },
+    });
+  };
+  const applyInfo = (el: ReturnType<typeof element>, info?: { cls?: string | string[]; text?: string; title?: string; type?: string; attr?: Record<string, string | number | boolean | null> }) => {
+    if (!info) return;
+    if (info.cls) el.className = Array.isArray(info.cls) ? info.cls.join(' ') : info.cls;
+    if (info.text !== undefined) el.textContent = info.text;
+    if (info.title !== undefined) el.title = info.title;
+    if (info.type !== undefined) el.type = info.type;
+    if (info.attr) for (const [k, v] of Object.entries(info.attr)) if (v !== null) {
+      el.setAttribute(k, String(v));
+      if (k === 'type') el.type = String(v);
+    }
+  };
   const viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 600, height: 400 });
   const win = Object.assign(new EventTarget(), { innerWidth: 600, innerHeight: 400, visualViewport: viewport,
+    setTimeout: (callback: () => void, ms?: number) => setTimeout(callback, ms) as unknown as number,
+    clearTimeout: (id?: number) => clearTimeout(id),
     requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 16), cancelAnimationFrame: clearTimeout });
   const elements: ReturnType<typeof element>[] = [];
+  const createInBody = (tag: string, info?: Parameters<typeof applyInfo>[1], callback?: (el: ReturnType<typeof element>) => void) => {
+    const el = element(tag, doc);
+    applyInfo(el, info);
+    callback?.(el);
+    elements.push(el);
+    body.children.push(el);
+    return el;
+  };
+  const body = {
+    children: [] as ReturnType<typeof element>[],
+    append: vi.fn(),
+    createEl: vi.fn((tag: string, info?: Parameters<typeof applyInfo>[1], cb?: (el: ReturnType<typeof element>) => void) => createInBody(tag, info, cb)),
+    createDiv: vi.fn((info?: Parameters<typeof applyInfo>[1], cb?: (el: ReturnType<typeof element>) => void) => createInBody('div', info, cb)),
+    createSpan: vi.fn((info?: Parameters<typeof applyInfo>[1], cb?: (el: ReturnType<typeof element>) => void) => createInBody('span', info, cb)),
+  };
   const doc = Object.assign(new EventTarget(), {
-    createElement: () => { const el = element(); elements.push(el); return el; },
-    body: { append: vi.fn() }, defaultView: win, activeElement: null as ReturnType<typeof element> | null,
+    body, defaultView: win, activeElement: null as ReturnType<typeof element> | null,
     elementFromPoint: vi.fn(() => host.dom as unknown as Element),
   });
   let phase: 'idle' | 'update' | 'read' | 'write' = 'idle';

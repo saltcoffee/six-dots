@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.8 - 2026-11-20
+
+- Speed up multi-block and whole-section move preview construction by reading line numbers from the captured CodeMirror `Text` (`doc.lineAt`) instead of rescanning or splitting full document strings.
+- Optimize drag drop-target resolution with a single-pass nearest-sibling scan (preserving original tie order) and gesture-scoped sibling reuse, and remove redundant document serializations during multi-block capability checks.
+- Migrate all 13 DOM creation sites to Obsidian helpers (`createEl`, `createDiv`, `createSpan`, and adopted `createFragment`) while keeping popout-window document ownership and initial hidden overlay states.
+- Scope all hide, touch-hold, cooperative parsing/validation, and peer-sync timers to their owning editor window, and release pending peer waits and receipts immediately when a view detaches.
+- Remove redundant type assertions in section-fold lookup, extraction target verification, and active move validation, and bind captured `MarkdownView` methods cleanly during CRLF save wrapping.
+- Add dual-version declarative settings (`getSettingDefinitions()`) for Obsidian 1.13.0+ search indexing alongside the legacy `display()` path for Obsidian 1.8.7+, preserving refresh, save queueing, future-schema write protection, and mobile handle behavior.
+- Remove CSS `clip-path` and `!important` from `.six-dots-status` and hidden overlay rules while keeping screen-reader live regions and specificity-scoped hiding.
+
+Automated typecheck, lint, unit/regression tests, production build, release metadata checks, and isolated desktop host verification in Obsidian 1.15.1 passed (declarative settings search and persistence, popout DOM/timer cleanup, theme-override CSS hiding, CRLF saves, and 5000-paragraph preview checks). Obsidian 1.8.7, assistive-technology, community-scanner re-scan, paired 0.1.7 A/B performance recording, and physical iOS/Android device verification remain pending.
+
 ## 0.1.7 - 2026-11-17
 
 - Move several consecutive top-level blocks, or several complete list siblings, up or down as one checked group from a plain non-empty selection.

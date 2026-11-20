@@ -196,4 +196,30 @@ describe('multi-block preview lifecycle', () => {
     await vi.runAllTimersAsync();
     expect(host.notify).not.toHaveBeenCalledWith('viewDiverged'); host.dispose();
   });
+
+  it('compares distinct peer Text instances by value and avoids redundant source serialization when cache matches doc', () => {
+    const host = setup();
+    host.cache.adopt(host.cache.snapshot!, host.raw.state.doc);
+    const equalPeer = {
+      state: EditorState.create({ doc: String(doc), selection: { anchor: 0 }, extensions: [editorInfoField] }),
+      dom: { isConnected: true, nodeType: 1, closest: () => null },
+    } as unknown as EditorView;
+    Object.assign(equalPeer.state.field(editorInfoField)!, { file: host.raw.state.field(editorInfoField)!.file });
+    expect(equalPeer.state.doc).not.toBe(host.raw.state.doc);
+    host.moves.attach(equalPeer, { cache: new SnapshotCache(), rebuild: vi.fn(), refresh: vi.fn() });
+
+    const toStringSpy = vi.spyOn(host.raw.state.doc, 'toString');
+    expect(host.moves.rangeReason(host.view, 1)).toBeNull();
+    expect(toStringSpy).not.toHaveBeenCalled();
+
+    const stalePeer = {
+      state: EditorState.create({ doc: doc + '\n\nextra', selection: { anchor: 0 }, extensions: [editorInfoField] }),
+      dom: { isConnected: true, nodeType: 1, closest: () => null },
+    } as unknown as EditorView;
+    Object.assign(stalePeer.state.field(editorInfoField)!, { file: host.raw.state.field(editorInfoField)!.file });
+    host.moves.attach(stalePeer, { cache: new SnapshotCache(), rebuild: vi.fn(), refresh: vi.fn() });
+    expect(host.moves.rangeReason(host.view, 1)).toBe('changed');
+    toStringSpy.mockRestore();
+    host.dispose();
+  });
 });

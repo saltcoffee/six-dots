@@ -15,7 +15,7 @@ import { SnapshotCache } from './snapshot-cache';
 import { foldEffects, mapSectionFolds, readFolds, sameFolds, sectionCommit, sectionMappingSteps, sectionMoveEffect } from './section-folds';
 import type { SectionMapping } from './section-folds';
 import { rangeMappingSteps, rangeSelection } from './range-mapping';
-import { CooperativeTask } from './cooperative-task';
+import { CooperativeTask, timerHost } from './cooperative-task';
 
 export interface PreparedMove {
   readonly target: MoveContext;
@@ -61,7 +61,9 @@ export class MovePreparation {
       }
       return { target, changes, expected, candidate, selection, originalSelection, originalFolds, folds, mapping, range: !!range };
     };
-    this.cache.prepare(expected.toString(), () => this.task.start(validate(this.cache), ready, failed), failed);
+    const timers = timerHost(view);
+    if (!timers) { failed(new Error('Window unavailable')); return; }
+    this.cache.prepare(expected.toString(), () => this.task.start(validate(this.cache), ready, failed, timers), failed, timers, expected);
   }
   cancel(): void { this.cache.cancel(); this.task.cancel(); }
 }

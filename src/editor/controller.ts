@@ -9,6 +9,8 @@ import { Actions } from '../obsidian/actions';
 import { editable, targetFor, fileFor, inTable, tableFocused } from './context';
 import type { Target } from './context';
 import { SnapshotCache } from './snapshot-cache';
+import { timerHost } from './cooperative-task';
+import type { TimerHost } from './cooperative-task';
 import { fitPoint, intersect, toFixedPoint, viewportBounds } from './viewport';
 import type { Point } from './viewport';
 import { sectionHistory } from './section-folds';
@@ -17,7 +19,7 @@ import type { Message } from '../i18n';
 
 interface Drag {
   target: Target; pointer: number; x: number; y: number; currentX: number; currentY: number;
-  active: boolean; plan: Plan | null;
+  active: boolean; plan: Plan | null; siblings?: readonly Block[];
   touch: boolean; armed: boolean;
 }
 function usesTouchUI(view: EditorView): boolean {
@@ -32,12 +34,12 @@ export class Controller {
   private block: Block | null = null;
   private menu: Menu | null = null;
   private drag: Drag | null = null;
-  private hideTimer: ReturnType<typeof setTimeout> | null = null;
+  private hideTimer: { timers: TimerHost; id: number } | null = null;
   private frame = 0;
   private disposed = false;
   private cleanup: (() => void)[] = [];
   private point: { x: number; y: number } | null = null;
-  private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  private holdTimer: { timers: TimerHost; id: number } | null = null;
   private file: TFile | null;
   private path: string | undefined;
   private get touchUI(): boolean { return usesTouchUI(this.view); }
@@ -45,14 +47,13 @@ export class Controller {
   constructor(readonly view: EditorView, readonly actions: Actions, private remove: () => void) {
     this.file = fileFor(view); this.path = this.file?.path;
     const doc = view.dom.ownerDocument;
-    this.button = doc.createElement('button'); this.button.className = 'six-dots-handle'; this.button.type = 'button';
-    this.button.setAttribute('aria-label', actions.t('actions')); this.button.title = actions.t('actions');
-    this.button.setAttribute('aria-haspopup', 'menu'); setIcon(this.button, 'grip-vertical');
-    this.indicator = doc.createElement('div'); this.indicator.className = 'six-dots-drop';
-    this.preview = doc.createElement('div'); this.preview.className = 'six-dots-preview';
-    this.status = doc.createElement('div'); this.status.className = 'six-dots-status'; this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
-    for (const element of [this.button, this.indicator, this.preview]) element.hidden = true;
-    doc.body.append(this.button, this.indicator, this.preview, this.status);
+    this.button = doc.body.createEl('button', {
+      cls: 'six-dots-handle', title: actions.t('actions'),
+      attr: { type: 'button', 'aria-label': actions.t('actions'), 'aria-haspopup': 'menu', hidden: '' },
+    }, el => { el.hidden = true; setIcon(el, 'grip-vertical'); });
+    this.indicator = doc.body.createDiv({ cls: 'six-dots-drop', attr: { hidden: '' } }, el => { el.hidden = true; });
+    this.preview = doc.body.createDiv({ cls: 'six-dots-preview', attr: { hidden: '' } }, el => { el.hidden = true; });
+    this.status = doc.body.createDiv({ cls: 'six-dots-status', attr: { role: 'status', 'aria-live': 'polite' } });
     this.listen(view.dom, 'pointermove', event => this.hover(event as PointerEvent));
     this.listen(view.dom, 'pointerdown', event => { if (inTable(event.target as Node | null)) this.clearTarget(); }, true);
     this.listen(view.dom, 'pointerleave', () => this.hideLater());
@@ -96,7 +97,8 @@ export class Controller {
   }
   private prepare(): void {
     this.block = null; this.button.hidden = true;
-    this.cache.prepare(this.view.state.doc.toString(), () => this.refresh());
+    const doc = this.view.state.doc;
+    this.cache.prepare(doc.toString(), () => this.refresh(), undefined, timerHost(this.view), doc);
   }
   private syncContext(): boolean {
     const file = fileFor(this.view);
@@ -132,7 +134,7 @@ export class Controller {
     this.clearHide(); this.point = { x: event.clientX, y: event.clientY };
     this.refresh();
   }
-  private clearHide(): void { if (this.hideTimer !== null) clearTimeout(this.hideTimer); this.hideTimer = null; }
+  private clearHide(): void { if (this.hideTimer) this.hideTimer.timers.clearTimeout(this.hideTimer.id); this.hideTimer = null; }
   private clearTarget(): void {
     this.menu?.hide(); this.cancel(); this.clearHide();
     this.point = null; this.block = null; this.button.hidden = true;
@@ -140,7 +142,9 @@ export class Controller {
   private hideLater(): void {
     this.clearHide();
     if (this.cursorHandle) return;
-    this.hideTimer = setTimeout(() => { if (!this.drag && !this.menu) { this.button.hidden = true; this.point = null; this.block = null; } }, 150);
+    const timers = timerHost(this.view);
+    if (!timers) return;
+    this.hideTimer = { timers, id: timers.setTimeout(() => { this.hideTimer = null; if (!this.drag && !this.menu) { this.button.hidden = true; this.point = null; this.block = null; } }, 150) };
   }
   private measure(): void {
     if (this.disposed) return;
@@ -238,11 +242,16 @@ export class Controller {
     const touch = event.pointerType === 'touch';
     const drag: Drag = { target, pointer: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX, currentY: event.clientY, active: false, plan: null, touch, armed: !touch };
     this.drag = drag;
-    if (touch && this.actions.settings().drag) this.holdTimer = setTimeout(() => {
-      this.holdTimer = null;
-      if (this.disposed || this.syncContext() || this.drag !== drag) return;
-      drag.armed = true; this.button.classList.add('is-ready'); this.status.textContent = this.actions.t('dragReady');
-    }, 350);
+    if (touch && this.actions.settings().drag) {
+      const timers = timerHost(this.view);
+      if (timers) {
+        this.holdTimer = { timers, id: timers.setTimeout(() => {
+          this.holdTimer = null;
+          if (this.disposed || this.syncContext() || this.drag !== drag) return;
+          drag.armed = true; this.button.classList.add('is-ready'); this.status.textContent = this.actions.t('dragReady');
+        }, 350) };
+      }
+    }
     try { this.button.setPointerCapture(event.pointerId); } catch { this.cancel(); }
   }
   private dragMove(event: PointerEvent): void {
@@ -293,11 +302,16 @@ export class Controller {
     const pos = this.view.posAtCoords({ x: Math.min(bounds.right - 2, Math.max(bounds.left + track + 4, drag.currentX)), y: drag.currentY });
     if (pos === null || isTablePosition(drag.target.snapshot, pos)) return;
     if (pos >= drag.target.block.from && pos <= drag.target.block.to) return;
-    const siblings = siblingBlocks(drag.target.snapshot, drag.target.block);
+    const siblings = drag.siblings ??= siblingBlocks(drag.target.snapshot, drag.target.block);
     const first = siblings[0], last = siblings.at(-1);
     if (!first || !last || drag.target.block.group !== 'root' && (pos < first.from || pos > last.to)) return;
-    const candidate = siblings.find(block => block.from <= pos && pos <= block.to)
-      ?? [...siblings].sort((a, b) => Math.min(Math.abs(a.from - pos), Math.abs(a.to - pos)) - Math.min(Math.abs(b.from - pos), Math.abs(b.to - pos)))[0];
+    let candidate: Block | undefined;
+    let best = Infinity;
+    for (const block of siblings) {
+      if (block.from <= pos && pos <= block.to) { candidate = block; break; }
+      const distance = Math.min(Math.abs(block.from - pos), Math.abs(block.to - pos));
+      if (distance < best) { best = distance; candidate = block; }
+    }
     if (!candidate) return;
     const start = this.view.coordsAtPos(candidate.from), end = this.view.coordsAtPos(candidate.to);
     const after = start && end ? drag.currentY > (start.top + end.bottom) / 2 : pos > (candidate.from + candidate.to) / 2;
@@ -327,7 +341,7 @@ export class Controller {
     this.refresh();
   }
   private resetDrag(pointer: number): void {
-    if (this.holdTimer !== null) clearTimeout(this.holdTimer);
+    if (this.holdTimer) this.holdTimer.timers.clearTimeout(this.holdTimer.id);
     this.holdTimer = null; this.button.classList.remove('is-ready');
     this.status.textContent = '';
     if (this.button.hasPointerCapture(pointer)) this.button.releasePointerCapture(pointer);

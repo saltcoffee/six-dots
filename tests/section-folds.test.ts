@@ -6,7 +6,7 @@ import { history, isolateHistory, redo, undo } from '@codemirror/commands';
 import { applyEdits } from '../src/domain/block';
 import { moveSection } from '../src/domain/section';
 import { parseSnapshot } from '../src/editor/markdown';
-import { cursorHidden, historyFoldNotice, mapSectionSelection, readFolds, sectionHistory, sectionMapping, sectionMoveEffect } from '../src/editor/section-folds';
+import { cursorHidden, historyFoldNotice, mapSectionSelection, readFolds, sectionHistory, sectionMapping, sectionMoveEffect, transactionSectionMapping } from '../src/editor/section-folds';
 
 const text = '## A\na\n\n\n## B\nb\n';
 function setup(folds: readonly { from: number; to: number }[] = [], selection = 0, doc = text) {
@@ -102,5 +102,14 @@ describe('section folds and public history', () => {
     expect(host.state.selection.main.head).toBe(5);
     expect(readFolds(host.state)).toEqual([]);
     expect(noticed).toBe(true);
+  });
+  it('extracts section mapping only from transactions that carry sectionMoveEffect', () => {
+    const host = setup();
+    const plain = host.state.update({ selection: { anchor: 1 } });
+    expect(transactionSectionMapping(plain)).toBeUndefined();
+    const snapshot = parseSnapshot(host.state.doc.toString()), move = moveSection(snapshot, 0, 1);
+    const mapping = sectionMapping(move, parseSnapshot(applyEdits(snapshot.text, move.plan.edits)));
+    const withEffect = host.state.update({ effects: sectionMoveEffect.of(mapping) });
+    expect(transactionSectionMapping(withEffect)).toBe(mapping);
   });
 });

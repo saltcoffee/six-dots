@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { history } from '@codemirror/commands';
 import type { EditorView } from '@codemirror/view';
@@ -37,21 +37,46 @@ vi.mock('../src/ui/dialogs', () => ({
   },
 }));
 
+const previousCreateFragment = (globalThis as { createFragment?: unknown }).createFragment;
+afterEach(() => {
+  if (previousCreateFragment === undefined) delete (globalThis as { createFragment?: unknown }).createFragment;
+  else (globalThis as { createFragment?: unknown }).createFragment = previousCreateFragment;
+});
+
 function setup(doc = 'alpha\n\nbeta', language?: string) {
   ui.submits = []; ui.notices = [];
   const root = new TFolder(), source = Object.assign(new TFile(), { path: 'Source.md' });
   root.children.push(source);
   const files = new Map([['Source.md', source]]);
   const content = new Map<string, string>();
+  const makeFragment = () => ({
+    ownerDocument: null as unknown,
+    text: '',
+    links: [] as { ownerDocument: unknown; click: () => void }[],
+    spans: [] as { ownerDocument: unknown; text: string }[],
+    createSpan(options: { text: string }) {
+      this.text += options.text;
+      this.spans.push({ ownerDocument: this.ownerDocument, text: options.text });
+      return {};
+    },
+    createEl(_tag: string, options: { text: string }) {
+      this.text += options.text;
+      let handler: ((event: { preventDefault(): void }) => void) | null = null;
+      this.links.push({ ownerDocument: this.ownerDocument, click: () => handler?.({ preventDefault() {} }) });
+      return { addEventListener(_type: string, fn: (event: { preventDefault(): void }) => void) { handler = fn; } };
+    },
+  });
+  (globalThis as unknown as { createFragment: () => ReturnType<typeof makeFragment> }).createFragment = makeFragment;
+  const ownerDocument = {
+    defaultView: {} as unknown,
+    adoptNode: vi.fn(<T extends { ownerDocument: unknown }>(node: T): T => {
+      node.ownerDocument = ownerDocument;
+      return node;
+    }),
+  };
   const view = {
     state: EditorState.create({ doc, extensions: [editorInfoField, history()] }),
-    dom: { isConnected: true, nodeType: 1, closest: () => null, ownerDocument: {
-      createDocumentFragment() {
-        return { text: '', createEl(_tag: string, options: { text: string }) {
-          this.text += options.text; return { addEventListener() {} };
-        } };
-      },
-    } },
+    dom: { isConnected: true, nodeType: 1, closest: () => null, ownerDocument },
     composing: false, focus: vi.fn(),
     dispatch(transaction: { state: EditorState }) { this.state = transaction.state; },
   };
@@ -67,14 +92,21 @@ function setup(doc = 'alpha\n\nbeta', language?: string) {
     adapter: { exists: vi.fn(async (path: string) => files.has(path)) },
     read: vi.fn(async (file: TFile) => content.get(file.path) ?? ''),
   };
+  const openFile = vi.fn(async () => undefined);
   const app = {
-    vault, workspace: { getLeavesOfType: () => [] },
+    vault, workspace: { getLeavesOfType: () => [], getLeaf: vi.fn(() => ({ openFile })) },
     fileManager: { generateMarkdownLink: (file: TFile) => `[[${file.path.replace(/\.md$/, '')}]]` },
     metadataCache: { getFirstLinkpathDest: (path: string) => files.get(path) ?? files.get(path + '.md') ?? null },
   } as unknown as App;
   const actions = new Actions(app, language ? translator(language) : key => key, () => defaults);
   const open = () => { actions.extract(view as unknown as EditorView, target); return ui.submits.at(-1)!; };
-  return { actions, open, view, target, vault, files, content, root };
+  const fragments: ReturnType<typeof makeFragment>[] = [];
+  (globalThis as unknown as { createFragment: () => ReturnType<typeof makeFragment> }).createFragment = () => {
+    const fragment = makeFragment();
+    fragments.push(fragment);
+    return fragment;
+  };
+  return { actions, open, view, target, vault, files, content, root, ownerDocument, fragments, openFile };
 }
 
 describe('localized quote conversion feedback', () => {
@@ -175,5 +207,47 @@ describe('host extraction safety', () => {
     expect(host.view.state.doc.toString()).toBe('alpha\n\nbeta');
     expect(host.files.has('Target.md')).toBe(true);
     expect(ui.notices).toHaveLength(0);
+  });
+
+  it('adopts extraction notice fragments into the originating document and handles open/missing link clicks', async () => {
+    const host = setup(), submit = host.open();
+    expect(await submit('Target', '', () => true)).toBeNull();
+    const fragment = host.fragments.at(-1)!;
+    expect(fragment.ownerDocument).toBe(host.ownerDocument);
+    expect(fragment.spans[0]?.ownerDocument).toBe(host.ownerDocument);
+    expect(fragment.links[0]?.ownerDocument).toBe(host.ownerDocument);
+
+    fragment.links[0]!.click();
+    expect(host.openFile).toHaveBeenCalledWith(host.files.get('Target.md'));
+
+    host.files.delete('Target.md');
+    fragment.links[0]!.click();
+    expect(ui.notices.at(-1)).toBe('missingNote');
+  });
+
+  it('keeps the active fragment without adopting into a closed originating popout document', async () => {
+    const host = setup(), submit = host.open(), create = host.vault.create.getMockImplementation()!;
+    host.vault.create.mockImplementation(async (path, text) => {
+      const file = await create(path, text);
+      host.ownerDocument.defaultView = null;
+      host.view.dom.isConnected = false;
+      return file;
+    });
+    const result = await submit('Target', '', () => true);
+    expect(result).toEqual({ message: 'partial', retryable: false });
+    expect(host.ownerDocument.adoptNode).not.toHaveBeenCalled();
+    expect(host.fragments.at(-1)?.ownerDocument).toBeNull();
+  });
+
+  it('refuses commit when the created destination file is replaced before target verification', async () => {
+    const host = setup(), submit = host.open(), create = host.vault.create.getMockImplementation()!;
+    host.vault.create.mockImplementation(async (path, text) => {
+      const file = await create(path, text);
+      host.files.set(path, Object.assign(new TFile(), { path }));
+      return file;
+    });
+    const result = await submit('Target', '', () => true);
+    expect(result).toEqual({ message: 'targetChanged', retryable: false });
+    expect(host.view.state.doc.toString()).toBe('alpha\n\nbeta');
   });
 });

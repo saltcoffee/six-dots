@@ -41,11 +41,11 @@ To install a published release manually:
 2. Put those files in `<your vault>/.obsidian/plugins/six-dots/`.
 3. Restart Obsidian and enable **SixDots** under **Settings → Community plugins**.
 
-Obsidian **1.8.7 or later** is declared as the minimum, and the plugin compiles against that SDK. Version 0.1.7 development validation uses the installed macOS Obsidian **1.15.0**; 1.8.7 has not been retested for this version. Mobile support is an early preview: automated touch tests and desktop mobile emulation do not replace iOS/Android physical-device checks, which remain pending. Windows and Linux verification is also pending. Reading view is outside the current scope.
+Obsidian **1.8.7 or later** is declared as the minimum, and the plugin compiles against that SDK. Version 0.1.8 development verification ran in the locally installed macOS Obsidian **1.15.1** (including declarative settings search, popout-window cleanup, and CSS hiding checks); 1.8.7 has not been retested for this version. Mobile support is an early preview: automated touch tests and desktop mobile emulation do not replace iOS/Android physical-device checks, which remain pending. Windows and Linux verification is also pending. Reading view is outside the current scope.
 
 On mobile, scroll and select text in the note normally. Start a drag from the handle after holding it; moving too early cancels the gesture. You can also choose **Move block up/down** from its menu without dragging. Mobile always uses the cursor handle, including when settings are synced from a desktop. If automatic clipboard access fails, a dialog keeps the block link available to select and copy manually.
 
-Version 0.1.7 remains unreleased. Native IME, assistive technology, real-user section-task comparisons, and complete performance acceptance remain pending.
+Version 0.1.8 remains unreleased. Obsidian 1.8.7 verification, native IME, assistive technology, community-scanner re-scan, and paired A/B performance acceptance remain pending.
 
 ## Settings
 

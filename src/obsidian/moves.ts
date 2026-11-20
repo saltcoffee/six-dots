@@ -3,10 +3,11 @@ import type { App } from 'obsidian';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import type { EditorSelection } from '@codemirror/state';
 import { BlockError } from '../domain/block';
-import type { Plan, Span } from '../domain/block';
+import type { Plan, Snapshot, Span } from '../domain/block';
 import { moveSection } from '../domain/section';
 import type { SectionMove } from '../domain/section';
 import { resolveRange } from '../domain/block-range';
+import type { RangeResolution } from '../domain/block-range';
 import { planRangeMove, rangeMoveReason } from '../domain/range-move';
 import type { RangeMove } from '../domain/range-move';
 import { contextFor, fileFor, rangeEditable, tableFocused } from '../editor/context';
@@ -58,6 +59,7 @@ export class Moves {
   detach(view: EditorView): void {
     this.finish(this.jobs.get(view));
     for (const job of this.jobs.values()) if (job.captures.has(view)) this.expire(job);
+    this.peers.detach(view);
     this.editors.delete(view); this.staged.delete(view);
   }
   private related(view: EditorView): readonly EditorView[] {
@@ -86,30 +88,37 @@ export class Moves {
   block(view: EditorView, target: Target, plan: Plan | null): void {
     if (plan) this.start(view, target, plan);
   }
-  /** Availability of an explicit multi-block move in one direction; null means it may run. */
-  rangeReason(view: EditorView, direction: -1 | 1): Message | null {
-    if (tableFocused(view)) return 'unsupported';
-    if (!rangeEditable(view)) return 'rangeSelection';
-    const snapshot = this.editors.get(view)?.cache.snapshot;
-    if (!snapshot || snapshot.text !== view.state.doc.toString()) return 'preparing';
-    if (this.related(view).some(peer => peer.state.doc.toString() !== snapshot.text)) return 'changed';
+  private inspectRange(view: EditorView, direction: -1 | 1):
+    | { reason: Message }
+    | { reason: null; snapshot: Snapshot; target: MoveContext; resolution: RangeResolution } {
+    if (tableFocused(view)) return { reason: 'unsupported' };
+    if (!rangeEditable(view)) return { reason: 'rangeSelection' };
+    const cache = this.editors.get(view)?.cache, snapshot = cache?.snapshot, doc = view.state.doc;
+    if (!snapshot || cache.doc !== doc && (snapshot.text.length !== doc.length || snapshot.text !== doc.toString())) {
+      return { reason: 'preparing' };
+    }
+    if (this.related(view).some(peer => peer !== view && peer.state.doc !== doc && !peer.state.doc.eq(doc))) {
+      return { reason: 'changed' };
+    }
+    const target = contextFor(view, snapshot);
+    if (!target) return { reason: 'preparing' };
     const selection = view.state.selection.main;
     try {
       const resolution = resolveRange(snapshot, selection.from, selection.to);
-      return rangeMoveReason(resolution, direction, snapshot);
-    } catch (error) { return error instanceof BlockError ? error.reason : 'failed'; }
+      const reason = rangeMoveReason(resolution, direction, snapshot);
+      return reason ? { reason } : { reason: null, snapshot, target, resolution };
+    } catch (error) { return { reason: error instanceof BlockError ? error.reason : 'failed' }; }
+  }
+  /** Availability of an explicit multi-block move in one direction; null means it may run. */
+  rangeReason(view: EditorView, direction: -1 | 1): Message | null {
+    return this.inspectRange(view, direction).reason;
   }
   range(view: EditorView, direction: -1 | 1): void {
-    const reason = this.rangeReason(view, direction);
-    if (reason) { this.host.notify(this.t(reason)); return; }
-    const snapshot = this.editors.get(view)?.cache.snapshot;
-    const target = snapshot && snapshot.text === view.state.doc.toString() ? contextFor(view, snapshot) : null;
-    if (!snapshot || !target) { this.host.notify(this.t('preparing')); return; }
+    const inspected = this.inspectRange(view, direction);
+    if (inspected.reason !== null) { this.host.notify(this.t(inspected.reason)); return; }
     try {
-      const selection = view.state.selection.main;
-      const resolution = resolveRange(snapshot, selection.from, selection.to);
-      const move = planRangeMove(snapshot, resolution, direction);
-      this.start(view, target, move.plan, { range: move });
+      const move = planRangeMove(inspected.snapshot, inspected.resolution, direction);
+      this.start(view, inspected.target, move.plan, { range: move });
     } catch (error) { this.host.error(error); }
   }
   private start(view: EditorView, target: MoveContext, plan: Plan, options: { section?: SectionMove; range?: RangeMove } = {}): void {
@@ -126,8 +135,8 @@ export class Moves {
       : range && region ? [...captures.values()].some(c => c.folds.some(f => f.from < region.to && f.to > region.from)) : false;
     const kind: Kind = section ? 'section' : range ? 'range' : 'block';
     const original = view.state.selection.main;
-    const ui = section ? new SectionMoveModal(this.app, this.t, target.snapshot, section, !!hidden, () => this.submit(job))
-      : range ? new RangeMoveModal(this.app, this.t, target.snapshot, range, original, !!hidden, () => this.submit(job), target.path)
+    const ui = section ? new SectionMoveModal(this.app, this.t, target.snapshot, section, !!hidden, () => this.submit(job), target.doc)
+      : range ? new RangeMoveModal(this.app, this.t, target.snapshot, range, original, !!hidden, () => this.submit(job), target.path, target.doc)
       : new MoveProgress(view.dom.ownerDocument, this.t, cancel);
     const doc = view.dom.ownerDocument, win = doc.defaultView;
     const blur = () => this.expire(job);
@@ -175,7 +184,7 @@ export class Moves {
     } catch (error) { this.fail(job, error); }
   }
   private active(job: Job): boolean {
-    const valid = job.kind === 'range' ? this.host.validContext(job.view, job.target) : this.host.valid(job.view, job.target as Target);
+    const valid = job.kind === 'range' ? this.host.validContext(job.view, job.target) : this.host.valid(job.view, job.target);
     return this.alive && this.jobs.get(job.view) === job && !job.expired && !job.consuming && valid
       && [...job.captures].every(([peer, capture]) => peer.dom.isConnected && fileFor(peer) === job.target.file
         && peer.state.doc.eq(job.target.doc) && peer.state.selection.eq(capture.selection, true) && sameFolds(readFolds(peer.state), capture.folds));
@@ -188,7 +197,7 @@ export class Moves {
       this.host.preserveLineEndings(job.view);
       let result = dispatchPrepared(job.view, move);
       if (result === 'applied' && this.alive && this.staged.get(job.view) === move && editor) {
-        editor.cache.adopt(move.candidate); editor.refresh();
+        editor.cache.adopt(move.candidate, move.expected); editor.refresh();
       } else {
         if (result === 'applied') result = 'viewDiverged';
         if (this.alive) editor?.rebuild();

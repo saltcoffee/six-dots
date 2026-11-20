@@ -4,6 +4,7 @@ import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { editorInfoField } from 'obsidian';
 import type { TFile } from 'obsidian';
 import { fileFor } from './context';
+import { timerHost } from './cooperative-task';
 import { mapSectionFolds, mapSectionSelection, readFolds, sameFolds, sectionMoveEffect } from './section-folds';
 import type { SectionMapping } from './section-folds';
 
@@ -49,7 +50,7 @@ export const sectionPeerFilter: Extension = [peerBinding, EditorState.transactio
 })];
 
 export class SectionPeers {
-  private cleanups = new Set<() => void>();
+  private cleanups = new Map<EditorView, Set<() => void>>();
   private receipts = new Map<EditorView, (state: EditorState) => void>();
   constructor(private views: () => readonly EditorView[], private diverged: () => void) {}
   arm(source: EditorView, before: Text, after: Text, mapping: SectionMapping): void {
@@ -62,9 +63,16 @@ export class SectionPeers {
       let folds, selection;
       try { folds = mapSectionFolds(readFolds(state), mapping, after.length); selection = mapSectionSelection(state.selection, mapping); }
       catch { this.diverged(); continue; }
+      const timers = timerHost(view);
+      if (!timers) continue;
+      let timer: number | null = null;
       const clear = () => {
         move.active = false; move.done = () => undefined;
-        pending.delete(state); clearTimeout(timer); this.cleanups.delete(clear);
+        pending.delete(state);
+        if (timer !== null) { timers.clearTimeout(timer); timer = null; }
+        const viewCleanups = this.cleanups.get(view);
+        viewCleanups?.delete(clear);
+        if (viewCleanups?.size === 0) this.cleanups.delete(view);
       };
       const done = (success: boolean) => {
         if (!move.active) return;
@@ -83,9 +91,11 @@ export class SectionPeers {
           });
         }
       };
-      const timer = setTimeout(() => done(false), 2000);
+      timer = timers.setTimeout(() => { timer = null; done(false); }, 2000);
       const move: Pending = { after, mapping, file, path: file.path, active: true, done };
-      this.cleanups.add(clear);
+      let viewCleanups = this.cleanups.get(view);
+      if (!viewCleanups) { viewCleanups = new Set(); this.cleanups.set(view, viewCleanups); }
+      viewCleanups.add(clear);
       pending.set(state, move);
     }
   }
@@ -97,5 +107,13 @@ export class SectionPeers {
     const move = pendingFor(update.startState);
     if (move && pendingFor(update.state) !== move) move.done(false);
   }
-  destroy(): void { for (const clear of this.cleanups) clear(); this.receipts.clear(); }
+  detach(view: EditorView): void {
+    const viewCleanups = this.cleanups.get(view);
+    if (viewCleanups) for (const clear of [...viewCleanups]) clear();
+    this.receipts.delete(view);
+  }
+  destroy(): void {
+    for (const viewCleanups of [...this.cleanups.values()]) for (const clear of [...viewCleanups]) clear();
+    this.cleanups.clear(); this.receipts.clear();
+  }
 }

@@ -1,11 +1,13 @@
 import { Platform } from 'obsidian';
 import type { App } from 'obsidian';
+import type { Text } from '@codemirror/state';
 import type { Translate } from '../i18n';
 import type { RangeMove } from '../domain/range-move';
 import type { Snapshot, Span } from '../domain/block';
 import { ManagedModal } from './dialogs';
 
-function lineOf(text: string, offset: number): number {
+function lineOf(text: string, offset: number, doc?: Text): number {
+  if (doc) return doc.lineAt(Math.max(0, Math.min(offset, doc.length))).number;
   let line = 1;
   for (let index = 0; index < offset && index < text.length; index++) if (text[index] === '\n') line++;
   return line;
@@ -16,8 +18,8 @@ function snippet(text: string, span: Span): { text: string; omitted: number } {
   return value.length > 60 ? { text: `${value.slice(0, 60)}…`, omitted: value.length - 60 } : { text: value, omitted: 0 };
 }
 
-function spanLines(text: string, span: Span): string {
-  return `${lineOf(text, span.from)}–${lineOf(text, Math.max(span.from, span.to - 1))}`;
+function spanLines(text: string, span: Span, doc?: Text): string {
+  return `${lineOf(text, span.from, doc)}–${lineOf(text, Math.max(span.from, span.to - 1), doc)}`;
 }
 
 export class RangeMoveModal extends ManagedModal {
@@ -25,7 +27,7 @@ export class RangeMoveModal extends ManagedModal {
   private confirm!: HTMLButtonElement;
   private resizeCleanup = () => undefined;
   constructor(app: App, private t: Translate, private snapshot: Snapshot, private move: RangeMove,
-    private original: Span, private hidden: boolean, private submit: () => void, private path: string) {
+    private original: Span, private hidden: boolean, private submit: () => void, private path: string, private doc?: Text) {
     super(app);
     // A stale dialog must never replay the editor selection captured when Obsidian opened it.
     this.shouldRestoreSelection = false;
@@ -34,13 +36,13 @@ export class RangeMoveModal extends ManagedModal {
     this.modalEl.classList.add('six-dots-section-modal', 'six-dots-range-modal');
     this.setTitle(this.t('rangeMoveTitle'));
     const text = this.snapshot.text;
-    const summary = this.contentEl.createEl('div', { cls: 'six-dots-section-summary' });
+    const summary = this.contentEl.createDiv({ cls: 'six-dots-section-summary' });
     const direction = this.move.direction < 0 ? this.t('rangeDirUp') : this.t('rangeDirDown');
     const units = this.move.source.units;
     const first = units[0]!, last = units.at(-1)!;
     summary.createEl('h3', { text: this.t('rangeSource') });
     summary.createEl('p', { text: this.path });
-    summary.createEl('p', { text: `${this.t('rangeDirection')}: ${direction} · ${this.t('rangeLineRange')}: ${lineOf(text, first.from)}–${lineOf(text, Math.max(last.from, last.to - 1))}` });
+    summary.createEl('p', { text: `${this.t('rangeDirection')}: ${direction} · ${this.t('rangeLineRange')}: ${lineOf(text, first.from, this.doc)}–${lineOf(text, Math.max(last.from, last.to - 1), this.doc)}` });
     summary.createEl('p', { text: `${this.t('rangeUnits')}: ${units.length} · ${this.t('rangeDescendants')}: ${units.reduce((sum, unit) => sum + unit.descendantCount, 0)}` });
     const firstText = snippet(text, first), lastText = snippet(text, last);
     summary.createEl('p', { cls: 'six-dots-section-heading', text: `${this.t('rangeEndpoints')}: ${this.t(first.kind)} · ${firstText.text} — ${this.t(last.kind)} · ${lastText.text}` });
@@ -49,17 +51,17 @@ export class RangeMoveModal extends ManagedModal {
       summary.createEl('h3', { text: this.t('rangeExtra') });
       for (const span of extra) {
         const info = snippet(text, span);
-        summary.createEl('p', { text: `${this.t('rangeExtraLines')} ${spanLines(text, span)} · ${info.text}${info.omitted ? ` · ${this.t('rangeOmitted')}: ${info.omitted}` : ''}` });
+        summary.createEl('p', { text: `${this.t('rangeExtraLines')} ${spanLines(text, span, this.doc)} · ${info.text}${info.omitted ? ` · ${this.t('rangeOmitted')}: ${info.omitted}` : ''}` });
       }
     }
     if (this.hidden) summary.createEl('p', { text: this.t('rangeHidden'), cls: 'six-dots-section-warning' });
     summary.createEl('h3', { text: this.t('rangeTarget') });
     const targetText = snippet(text, this.move.target);
     summary.createEl('p', { cls: 'six-dots-section-heading', text: `${this.t(this.move.target.kind)} · ${targetText.text}` });
-    summary.createEl('p', { text: `${this.t('rangeLineRange')}: ${spanLines(text, this.move.target)}${this.move.target.descendantCount ? ` · ${this.t('rangeDescendants')}: ${this.move.target.descendantCount}` : ''}${targetText.omitted ? ` · ${this.t('rangeOmitted')}: ${targetText.omitted}` : ''}` });
+    summary.createEl('p', { text: `${this.t('rangeLineRange')}: ${spanLines(text, this.move.target, this.doc)}${this.move.target.descendantCount ? ` · ${this.t('rangeDescendants')}: ${this.move.target.descendantCount}` : ''}${targetText.omitted ? ` · ${this.t('rangeOmitted')}: ${targetText.omitted}` : ''}` });
     if (this.move.numberingChanges.length) {
       summary.createEl('h3', { text: this.t('rangeNumberingExtra') });
-      for (const change of this.move.numberingChanges) summary.createEl('p', { text: `${this.t('rangeExtraLines')} ${lineOf(text, change.from)} · ${change.before} → ${change.after}` });
+      for (const change of this.move.numberingChanges) summary.createEl('p', { text: `${this.t('rangeExtraLines')} ${lineOf(text, change.from, this.doc)} · ${change.before} → ${change.after}` });
     }
     summary.createEl('h3', { text: this.t('rangeOrder') });
     const order = this.move.direction < 0 ? [...units, this.move.target] : [this.move.target, ...units];
@@ -75,7 +77,7 @@ export class RangeMoveModal extends ManagedModal {
       }
     }
     this.status = this.contentEl.createEl('p', { text: this.t('rangePreparing'), attr: { role: 'status', 'aria-live': 'polite' } });
-    const controls = this.contentEl.createEl('div', { cls: 'six-dots-move-controls' });
+    const controls = this.contentEl.createDiv({ cls: 'six-dots-move-controls' });
     const cancel = controls.createEl('button', { text: this.t('cancel'), attr: { type: 'button' } });
     cancel.addEventListener('click', () => this.close());
     this.confirm = controls.createEl('button', { text: this.t(this.move.direction < 0 ? 'rangeConfirmUp' : 'rangeConfirmDown'), cls: 'mod-cta', attr: { type: 'button' } });

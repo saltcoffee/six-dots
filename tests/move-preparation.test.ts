@@ -111,4 +111,41 @@ describe('prepared move transaction proof', () => {
     };
     expect(dispatchPrepared(host.editor, move)).toBe(changed === 'selection' ? 'viewDiverged' : 'diverged');
   });
+
+  it('routes candidate parsing and validation timers through the owning editor window', () => {
+    let next = 1;
+    const active = new Map<number, () => void>();
+    const cleared: number[] = [];
+    const win = {
+      setTimeout: (fn: () => void) => { const id = next++; active.set(id, fn); return id; },
+      clearTimeout: (id?: number) => { if (id !== undefined) { cleared.push(id); active.delete(id); } },
+    };
+    const view = {
+      state: EditorState.create({ doc: 'alpha\n\nbeta', selection: { anchor: 1 }, extensions: [editorInfoField, foldState, history(), sectionHistory] }),
+      dom: { isConnected: true, nodeType: 1, closest: () => null, ownerDocument: { defaultView: win } },
+      composing: false,
+      dispatch(tr: Transaction) { this.state = tr.state; },
+    };
+    const editor = view as unknown as EditorView, snapshot = parseSnapshot(view.state.doc.toString());
+    const target = targetFor(editor, snapshot.roots[0]!, snapshot)!;
+    const plan = moveBy(snapshot, target.block, 1)!;
+    const prep = new MovePreparation(), ready = vi.fn(), failed = vi.fn();
+
+    prep.prepare(editor, target, plan, undefined, ready, failed);
+    expect([...active.keys()]).toEqual([1]);
+    prep.cancel();
+    expect(cleared).toEqual([1]);
+    expect(active.size).toBe(0);
+
+    prep.prepare(editor, target, plan, undefined, ready, failed);
+    while (active.size > 0) {
+      const entry = active.entries().next().value;
+      if (!entry) break;
+      const [id, fn] = entry;
+      active.delete(id);
+      fn();
+    }
+    expect(failed).not.toHaveBeenCalled();
+    expect(ready).toHaveBeenCalledOnce();
+  });
 });

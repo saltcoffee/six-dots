@@ -34,15 +34,66 @@ interface SettingsOwner {
   t: Translate;
   plugin: import('obsidian').Plugin;
 }
+export interface DeclarativeSettingDefinition {
+  name: string;
+  desc?: string;
+  render: (setting: Setting) => void;
+}
 export class SixDotsSettingsTab extends PluginSettingTab {
   constructor(app: App, private owner: SettingsOwner) { super(app, owner.plugin); }
+  private save(): void {
+    const { t } = this.owner;
+    this.owner.refresh();
+    void this.owner.save().catch(() => new Notice(t('saveFailed')));
+  }
+  getSettingDefinitions(): DeclarativeSettingDefinition[] {
+    const { t } = this.owner;
+    return [
+      {
+        name: t('enableDrag'),
+        desc: t('enableDragHelp'),
+        render: setting => {
+          const { settings } = this.owner;
+          setting.addToggle(control => control.setValue(settings.drag).onChange(value => { settings.drag = value; this.save(); }));
+        },
+      },
+      {
+        name: t('handleMode'),
+        desc: t(Platform.isMobile ? 'mobileHandleHelp' : 'handleModeHelp'),
+        render: setting => {
+          const { settings, t: translate } = this.owner;
+          setting.addDropdown(control => control.addOptions({ hover: translate('hover'), cursor: translate('cursor') })
+            .setValue(Platform.isMobile ? 'cursor' : settings.handle)
+            .setDisabled(Platform.isMobile)
+            .onChange(value => { if (Platform.isMobile) return; settings.handle = value === 'cursor' ? 'cursor' : 'hover'; this.save(); }));
+        },
+      },
+      {
+        name: t('defaultCallout'),
+        render: setting => {
+          const { settings, t: translate } = this.owner;
+          setting.addDropdown(control => control.addOptions({ note: translate('note'), info: translate('info'), tip: translate('tip'), warning: translate('warning') })
+            .setValue(settings.callout)
+            .onChange(value => { settings.callout = value as CalloutType; this.save(); }));
+        },
+      },
+      {
+        name: t('extractFolder'),
+        desc: t('extractFolderHelp'),
+        render: setting => {
+          const { settings } = this.owner;
+          setting.addText(control => control.setValue(settings.folder).onChange(value => { settings.folder = value.trim(); this.save(); }));
+        },
+      },
+    ];
+  }
   display(): void {
-    const { containerEl } = this, { t, settings } = this.owner;
+    const { containerEl } = this;
     containerEl.empty();
-    const save = () => { this.owner.refresh(); void this.owner.save().catch(() => new Notice(t('saveFailed'))); };
-    new Setting(containerEl).setName(t('enableDrag')).setDesc(t('enableDragHelp')).addToggle(control => control.setValue(settings.drag).onChange(value => { settings.drag = value; save(); }));
-    new Setting(containerEl).setName(t('handleMode')).setDesc(t(Platform.isMobile ? 'mobileHandleHelp' : 'handleModeHelp')).addDropdown(control => control.addOptions({ hover: t('hover'), cursor: t('cursor') }).setValue(Platform.isMobile ? 'cursor' : settings.handle).setDisabled(Platform.isMobile).onChange(value => { settings.handle = value === 'cursor' ? 'cursor' : 'hover'; save(); }));
-    new Setting(containerEl).setName(t('defaultCallout')).addDropdown(control => control.addOptions({ note: t('note'), info: t('info'), tip: t('tip'), warning: t('warning') }).setValue(settings.callout).onChange(value => { settings.callout = value as CalloutType; save(); }));
-    new Setting(containerEl).setName(t('extractFolder')).setDesc(t('extractFolderHelp')).addText(control => control.setValue(settings.folder).onChange(value => { settings.folder = value.trim(); save(); }));
+    for (const item of this.getSettingDefinitions()) {
+      const setting = new Setting(containerEl).setName(item.name);
+      if (item.desc) setting.setDesc(item.desc);
+      item.render(setting);
+    }
   }
 }
