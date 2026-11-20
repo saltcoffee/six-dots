@@ -101,4 +101,62 @@ describe('same-file view adaptation', () => {
     expect(host.diverged).toHaveBeenCalledOnce();
     expect(host.peer.state.doc.toString()).toBe(host.source.state.doc.toString()); host.peers.destroy();
   });
+  it('scopes wait timers to each peer window, avoids cross-window ID collision, and cleans up on detach', async () => {
+    const makeWindow = () => {
+      let next = 1;
+      const active = new Map<number, () => void>();
+      const cleared: number[] = [];
+      return {
+        active, cleared,
+        setTimeout: (fn: () => void) => { const id = next++; active.set(id, fn); return id; },
+        clearTimeout: (id?: number) => { if (id !== undefined) { cleared.push(id); active.delete(id); } },
+      };
+    };
+    const text = '## A\na\n\n\n## B\nb\n', snapshot = parseSnapshot(text), move = moveSection(snapshot, 0, 1);
+    const candidate = parseSnapshot(applyEdits(text, move.plan.edits)), mapping = sectionMapping(move, candidate);
+    const winA = makeWindow(), winB = makeWindow();
+    const make = (win?: ReturnType<typeof makeWindow>) => ({
+      state: EditorState.create({ doc: text, selection: { anchor: 13 }, extensions: [editorInfoField, foldState, sectionHistory, sectionPeerFilter] }),
+      dom: { nodeType: 1, closest: () => null, ownerDocument: { defaultView: win ?? null } },
+      dispatch(tr: Transaction) { this.state = tr.state; },
+    });
+    const source = make(), peerA = make(winA), peerB = make(winB);
+    const sharedFile = source.state.field(editorInfoField)!.file;
+    Object.assign(peerA.state.field(editorInfoField)!, { file: sharedFile });
+    Object.assign(peerB.state.field(editorInfoField)!, { file: sharedFile });
+
+    const diverged = vi.fn();
+    const peers = new SectionPeers(() => [source, peerA, peerB] as unknown as EditorView[], diverged);
+    peers.arm(source as unknown as EditorView, source.state.doc, Text.of(candidate.text.split('\n')), mapping);
+    expect([...winA.active.keys()]).toEqual([1]);
+    expect([...winB.active.keys()]).toEqual([1]);
+
+    // Closing popout window A detaches peerA: clears only winA timer 1, no diverged notice.
+    peers.detach(peerA as unknown as EditorView);
+    expect(winA.cleared).toEqual([1]);
+    expect(winA.active.size).toBe(0);
+    expect(winB.cleared).toEqual([]);
+    expect([...winB.active.keys()]).toEqual([1]);
+    expect(diverged).not.toHaveBeenCalled();
+
+    // Subsequent sync on peerB succeeds and clears winB timer 1.
+    peerB.dispatch(peerB.state.update({ changes: [...move.plan.edits] }));
+    expect(winB.cleared).toEqual([1]);
+    expect(winB.active.size).toBe(0);
+    await Promise.resolve();
+    expect(diverged).not.toHaveBeenCalled();
+
+    // Detaching after sync cancels pending receipt verification safely.
+    const peerC = make(makeWindow());
+    Object.assign(peerC.state.field(editorInfoField)!, { file: sharedFile });
+    const peers2 = new SectionPeers(() => [source, peerC] as unknown as EditorView[], diverged);
+    peers2.arm(source as unknown as EditorView, source.state.doc, Text.of(candidate.text.split('\n')), mapping);
+    peerC.dispatch(peerC.state.update({ changes: [...move.plan.edits] }));
+    peerC.dispatch(peerC.state.update({ selection: { anchor: 0 } }));
+    peers2.detach(peerC as unknown as EditorView);
+    await Promise.resolve();
+    expect(diverged).not.toHaveBeenCalled();
+    peers.destroy();
+    peers2.destroy();
+  });
 });

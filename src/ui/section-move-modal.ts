@@ -1,16 +1,24 @@
 import { Platform } from 'obsidian';
 import type { App } from 'obsidian';
+import type { Text } from '@codemirror/state';
 import type { Translate } from '../i18n';
 import type { SectionMove } from '../domain/section';
 import type { Snapshot } from '../domain/block';
 import { ManagedModal } from './dialogs';
+
+function lineOf(text: string, offset: number, doc?: Text): number {
+  if (doc) return doc.lineAt(Math.max(0, Math.min(offset, doc.length))).number;
+  let line = 1;
+  for (let index = 0; index < offset && index < text.length; index++) if (text[index] === '\n') line++;
+  return line;
+}
 
 export class SectionMoveModal extends ManagedModal {
   private status!: HTMLParagraphElement;
   private confirm!: HTMLButtonElement;
   private resizeCleanup = () => undefined;
   constructor(app: App, private t: Translate, private snapshot: Snapshot, private move: SectionMove,
-    private hidden: boolean, private submit: () => void) {
+    private hidden: boolean, private submit: () => void, private doc?: Text) {
     super(app);
     // A stale dialog must never replay the editor selection captured when Obsidian opened it.
     this.shouldRestoreSelection = false;
@@ -18,10 +26,11 @@ export class SectionMoveModal extends ManagedModal {
   onOpen(): void {
     this.modalEl.classList.add('six-dots-section-modal');
     this.setTitle(this.t('sectionMoveTitle'));
-    const summary = this.contentEl.createEl('div', { cls: 'six-dots-section-summary' });
+    const text = this.snapshot.text;
+    const summary = this.contentEl.createDiv({ cls: 'six-dots-section-summary' });
     for (const [key, section] of [['sectionSource', this.move.source], ['sectionTarget', this.move.target]] as const) {
-      const from = this.snapshot.text.slice(0, section.from).split('\n').length;
-      const to = this.snapshot.text.slice(0, Math.max(section.from, section.to - 1)).split('\n').length;
+      const from = lineOf(text, section.from, this.doc);
+      const to = lineOf(text, Math.max(section.from, section.to - 1), this.doc);
       summary.createEl('h3', { text: this.t(key) });
       summary.createEl('p', { text: `H${section.heading.level} · ${section.heading.title}`, cls: 'six-dots-section-heading' });
       summary.createEl('p', { text: `${this.t('sectionRange')}: ${from}–${to} · ${this.t('sectionLines')}: ${to - from + 1} · ${this.t('sectionSubheadings')}: ${section.childHeadingCount}` });
@@ -32,7 +41,7 @@ export class SectionMoveModal extends ManagedModal {
     const list = summary.createEl('ol');
     for (const section of order) list.createEl('li', { text: `H${section.heading.level} · ${section.heading.title}` });
     this.status = this.contentEl.createEl('p', { text: this.t('sectionPreparing'), attr: { role: 'status', 'aria-live': 'polite' } });
-    const controls = this.contentEl.createEl('div', { cls: 'six-dots-move-controls' });
+    const controls = this.contentEl.createDiv({ cls: 'six-dots-move-controls' });
     const cancel = controls.createEl('button', { text: this.t('cancel'), attr: { type: 'button' } });
     cancel.addEventListener('click', () => this.close());
     this.confirm = controls.createEl('button', { text: this.t('sectionConfirm'), cls: 'mod-cta', attr: { type: 'button' } });
@@ -61,12 +70,10 @@ export class MoveProgress {
   private status: HTMLSpanElement;
   private cleanup: () => void;
   constructor(doc: Document, t: Translate, cancel: () => void) {
-    this.element = doc.createElement('div'); this.element.className = 'six-dots-move-progress';
-    this.status = doc.createElement('span'); this.status.textContent = t('movePreparing');
-    this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
-    const button = doc.createElement('button'); button.type = 'button'; button.textContent = t('cancel');
+    this.element = doc.body.createDiv({ cls: 'six-dots-move-progress' });
+    this.status = this.element.createSpan({ text: t('movePreparing'), attr: { role: 'status', 'aria-live': 'polite' } });
+    const button = this.element.createEl('button', { text: t('cancel'), attr: { type: 'button' } });
     button.addEventListener('click', cancel);
-    this.element.append(this.status, button); doc.body.append(this.element);
     const win = doc.defaultView, viewport = win?.visualViewport;
     const resize = () => {
       const bottom = viewport && win ? Math.max(12, win.innerHeight - viewport.offsetTop - viewport.height + 12) : 12;

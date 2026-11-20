@@ -25,18 +25,18 @@ export class LineEndings {
     if (previous?.file === file) return;
     previous?.cleanup();
     const descriptor = Object.getOwnPropertyDescriptor(view, 'getViewData');
-    const original = view.getViewData;
+    const original = view.getViewData.bind(view);
     const unloadDescriptor = Object.getOwnPropertyDescriptor(view, 'onUnloadFile');
-    const originalUnload = view.onUnloadFile;
+    const originalUnload = view.onUnloadFile.bind(view);
     let active = true;
-    const wrapped = function(this: MarkdownView): string {
-      const text = original.call(this);
+    const wrapped = function(): string {
+      const text = original();
       // The host also normalizes data during history and peer synchronization.
       // Keep the loaded format for this file identity, independently of that cache.
-      return active && this.file === file ? text.replace(/\r?\n/g, '\r\n') : text;
+      return active && view.file === file ? text.replace(/\r?\n/g, '\r\n') : text;
     };
-    const unload = async function(this: MarkdownView, unloaded: TFile): Promise<void> {
-      try { await originalUnload.call(this, unloaded); }
+    const unload = async function(unloaded: TFile): Promise<void> {
+      try { await originalUnload(unloaded); }
       finally { cleanup(); }
     };
     const cleanup = () => {

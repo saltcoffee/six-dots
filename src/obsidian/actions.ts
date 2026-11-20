@@ -198,7 +198,7 @@ export class Actions {
           },
           valid: () => active() && this.valid(view, target),
           verifyTarget: async () => {
-            const file = created as TFile | null;
+            const file = created;
             if (!file || this.app.vault.getAbstractFileByPath(path) !== file) return false;
             const stamp = `${file.stat.mtime}:${file.stat.size}`;
             if (await this.app.vault.read(file) !== content || stamp !== `${file.stat.mtime}:${file.stat.size}`) return false;
@@ -223,8 +223,9 @@ export class Actions {
     this.open(modal);
   }
   private extractionNotice(doc: Document, path: string, key: 'extracted' | 'partial' | 'targetChanged' | 'diverged' | 'unknownCreate'): void {
-    const fragment = doc.createDocumentFragment();
-    fragment.createEl('span', { text: `${this.t(key)} ${path} ` });
+    const raw = createFragment();
+    const fragment = doc.defaultView ? doc.adoptNode(raw) : raw;
+    fragment.createSpan({ text: `${this.t(key)} ${path} ` });
     fragment.createEl('a', { text: this.t('openNote'), href: '#' }).addEventListener('click', event => {
       event.preventDefault(); const file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) void this.app.workspace.getLeaf(true).openFile(file);

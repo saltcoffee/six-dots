@@ -369,4 +369,83 @@ describe('mobile interaction', () => {
     editor.pointer('pointerup', { pointerType: 'mouse', clientX: 80, clientY: 90 });
     expect(editor.apply).toHaveBeenCalledOnce();
   });
+
+  it('creates overlays in the owning document via helpers without duplicate appends and isolates colliding window timers', async () => {
+    const makeWindowTimers = () => {
+      let next = 1;
+      const active = new Map<number, () => void>();
+      const cleared: number[] = [];
+      return {
+        active, cleared,
+        setTimeout: (fn: () => void) => { const id = next++; active.set(id, fn); return id; },
+        clearTimeout: (id?: number) => { if (id !== undefined) { cleared.push(id); active.delete(id); } },
+      };
+    };
+    const first = setup('hover', false), second = setup('hover', false);
+    expect(first.doc.body.append).not.toHaveBeenCalled();
+    expect(first.doc.body.children).toEqual([first.button, first.indicator, first.preview, first.status]);
+    expect(first.button.ownerDocument).toBe(first.doc);
+    expect(second.button.ownerDocument).toBe(second.doc);
+    expect(first.button.type).toBe('button');
+    expect(first.button.getAttribute('aria-haspopup')).toBe('menu');
+    expect(first.status.getAttribute('role')).toBe('status');
+    expect(first.status.getAttribute('aria-live')).toBe('polite');
+    expect([first.button.hidden, first.indicator.hidden, first.preview.hidden]).toEqual([true, true, true]);
+    expect([first.button.getAttribute('hidden'), first.indicator.getAttribute('hidden'), first.preview.getAttribute('hidden')]).toEqual(['', '', '']);
+
+    await vi.runAllTimersAsync();
+    const timersA = makeWindowTimers(), timersB = makeWindowTimers();
+    first.win.setTimeout = timersA.setTimeout; first.win.clearTimeout = timersA.clearTimeout;
+    second.win.setTimeout = timersB.setTimeout; second.win.clearTimeout = timersB.clearTimeout;
+
+    first.hover(); first.measure();
+    second.hover(); second.measure();
+    first.host.dom.dispatchEvent(new Event('pointerleave'));
+    second.host.dom.dispatchEvent(new Event('pointerleave'));
+    expect([...timersA.active.keys()]).toEqual([1]);
+    expect([...timersB.active.keys()]).toEqual([1]);
+
+    first.button.dispatchEvent(new Event('pointerenter'));
+    expect(timersA.cleared).toEqual([1]);
+    expect(timersB.cleared).toEqual([]);
+    expect([...timersB.active.keys()]).toEqual([1]);
+
+    // Also verify touch hold timers stay isolated across windows with colliding timer IDs.
+    const touchA = setup('hover', true), touchB = setup('hover', true);
+    await vi.runAllTimersAsync();
+    touchA.measure(); touchB.measure();
+    const holdA = makeWindowTimers(), holdB = makeWindowTimers();
+    touchA.win.setTimeout = holdA.setTimeout; touchA.win.clearTimeout = holdA.clearTimeout;
+    touchB.win.setTimeout = holdB.setTimeout; touchB.win.clearTimeout = holdB.clearTimeout;
+    touchA.pointer('pointerdown');
+    touchB.pointer('pointerdown');
+    expect([...holdA.active.keys()]).toEqual([1]);
+    expect([...holdB.active.keys()]).toEqual([1]);
+    touchA.pointer('pointercancel');
+    expect(holdA.cleared).toEqual([1]);
+    expect(holdB.cleared).toEqual([]);
+    expect([...holdB.active.keys()]).toEqual([1]);
+
+    // A closed popout document (defaultView === null) must not leak timers onto globalThis.
+    const countBefore = vi.getTimerCount();
+    (first.doc as unknown as { defaultView: unknown }).defaultView = null;
+    first.host.dom.dispatchEvent(new Event('pointerleave'));
+    expect(vi.getTimerCount()).toBe(countBefore);
+  });
+
+  it('breaks equidistant drag gap ties in favor of the earlier sibling in original order', async () => {
+    const editor = setup();
+    const text = 'first\n\nsecond\n\nthird';
+    editor.update({ changes: { from: 0, to: editor.host.state.doc.length, insert: text } });
+    await vi.runAllTimersAsync();
+    editor.hover(1); editor.measure();
+    editor.host.coordsAtPos.mockImplementation(pos => ({ left: 40, right: 40, top: pos * 10, bottom: pos * 10 + 20 }));
+    editor.pointer('pointerdown', { pointerType: 'mouse' });
+    editor.pointAt(14);
+    editor.pointer('pointermove', { pointerType: 'mouse', clientX: 80, clientY: 120 });
+    await vi.advanceTimersByTimeAsync(16);
+    editor.pointer('pointerup', { pointerType: 'mouse', clientX: 80, clientY: 120 });
+    expect(editor.apply).toHaveBeenCalledOnce();
+    expect(editor.apply.mock.calls[0]?.[2].edits[0].insert).toBe('second\n\nfirst');
+  });
 });

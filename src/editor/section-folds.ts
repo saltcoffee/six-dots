@@ -143,7 +143,7 @@ export function foldEffects(state: EditorState, changes: ChangeDesc, folds: read
 }
 
 export function transactionSectionMapping(transaction: Transaction): SectionMapping | undefined {
-  return transaction.effects.find(effect => effect.is(sectionMoveEffect))?.value as SectionMapping | undefined;
+  return transaction.effects.find(effect => effect.is(sectionMoveEffect))?.value;
 }
 
 export const sectionHistory: Extension = [

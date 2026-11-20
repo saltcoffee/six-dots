@@ -110,8 +110,9 @@ describe('host serialization of CRLF notes edited by SixDots', () => {
     endings.preserve(source.view); endings.destroy();
     expect(source.info.getViewData).toBe(original);
     endings.preserve(source.view);
-    const ours = source.info.getViewData, outer = () => ours.call(source.info) + 'suffix';
+    const ours = source.info.getViewData, outer = () => ours() + 'suffix';
     source.info.getViewData = outer;
+    expect(source.info.getViewData()).toBe('Alpha.\r\n\r\nBravo.\r\nsuffix');
     endings.destroy();
     expect(source.info.getViewData).toBe(outer);
     expect(source.info.getViewData()).toBe('Alpha.\n\nBravo.\nsuffix');
